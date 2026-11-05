@@ -193,3 +193,58 @@ body::before { width: min(26vw, 420px); height: min(14vh, 120px); }
 .si-shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .si-shots img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
 .in-store #search { width: 240px; }
+
+/* Steam downloads panel, visible on every page */
+#jobs { position: fixed; right: 44px; bottom: 20px; width: 400px; background: #0f111b; border: 2px solid var(--accent); z-index: 40; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+#jobs-head { display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: 0; padding: 8px 14px; text-align: left; }
+#jobs-head b { flex: none; text-transform: uppercase; letter-spacing: 1px; }
+#jobs-sum { flex: 1; min-width: 0; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#jobs-toggle { font-style: normal; }
+#jobs-list { max-height: 46vh; overflow-y: auto; padding: 0 14px; }
+#jobs.closed #jobs-list { display: none; }
+.job { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 8px 0; border-top: 1px solid #1b1e2d; }
+.job-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-pct { color: var(--text-dim); }
+.job .bar { grid-column: 1 / -1; height: 6px; margin: 0; max-width: none; }
+.job-detail { font-family: var(--font-body); font-size: 12.5px; color: var(--text-dim); align-self: center; min-height: 1em; }
+.job-btns { display: flex; gap: 6px; }
+.job-btn { background: #1b1e2d; border: 1px solid #343850; padding: 2px 10px; font-size: 14px; }
+.job-btn:hover { background: var(--accent); }
+.job-btn:disabled { opacity: .5; cursor: default; }
+
+/* store browsing */
+.in-store footer { height: 0; padding: 0; }
+.in-store #store { margin-bottom: 0; padding-bottom: 24px; }
+.store-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.store-bar select { background: #0b0c14; border: 2px solid var(--line); padding: 6px 8px; }
+.store-sale { display: flex; align-items: center; gap: 6px; }
+.store-grid.browse { grid-template-columns: repeat(auto-fill, minmax(231px, 1fr)); }
+.store-card.wide img { aspect-ratio: 231 / 87; }
+.sc-date { margin-right: auto; color: var(--text-dim); font-size: 14px; white-space: nowrap; overflow: hidden; }
+.sc-foot { min-height: 28px; }
+
+/* store filters, on the right like Steam's search page */
+.store-cols { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 18px; align-items: start; }
+.store-main > div:first-child > .store-h:first-child { margin-top: 0; }
+.store-results-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 22px 0 10px; }
+.store-results-head .store-h { margin: 0; }
+.store-results-head select, .store-side select { background: #0b0c14; border: 2px solid var(--line); padding: 6px 8px; }
+.store-side { position: sticky; top: 0; max-height: calc(100vh - 140px); overflow-y: auto; background: var(--panel); padding: 8px 12px; }
+.sf-sec { border-bottom: 1px solid #1b1e2d; padding: 8px 0; }
+.sf-sec:last-child { border-bottom: 0; }
+.sf-sec summary { cursor: pointer; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+.sf-sec select { width: 100%; margin-top: 8px; }
+.sf-check { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-family: var(--font-body); font-size: 13.5px; cursor: pointer; }
+.sf-check:first-of-type { margin-top: 6px; }
+.sf-find { width: 100%; margin-top: 8px; background: #0b0c14; border: 1px solid #2c3042; padding: 5px 8px; font-family: var(--font-body); font-size: 13px; }
+.sf-tags { max-height: 220px; overflow-y: auto; margin-top: 4px; }
+.sf-clear { width: 100%; background: var(--accent); border: 0; padding: 6px; font-weight: 700; margin-bottom: 4px; }
+@media (max-width: 1000px) { .store-cols { grid-template-columns: minmax(0, 1fr) 210px; } }
+
+/* Steam's two progress lines */
+.job-stages { grid-column: 1 / -1; display: grid; gap: 5px; }
+.job-stages:empty { display: none; }
+.job-stage { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-family: var(--font-body); font-size: 12.5px; }
+.job-stage .bar { grid-column: 1 / -1; height: 5px; margin: 0; max-width: none; }
+.job-detail { grid-column: 1 / -1; }
+.job-btns { grid-column: 1 / -1; justify-content: flex-end; }

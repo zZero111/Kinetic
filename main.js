@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, net
 const importers = require('./importers');
 const updater = require('./updater');
 const store = require('./store');
+const steamctl = require('./steamctl');
+const steamlive = require('./steamlive');
 const { spawn, execFile } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
@@ -1070,3 +1072,172 @@ ipcMain.handle('store:steam', async (_e, action, id) => {
   if (!urls[action] || (action !== 'downloads' && !Number.isInteger(appid))) return { ok: false, error: 'Unknown Steam action' };
   try { await shell.openExternal(urls[action]); return { ok: true }; } catch { return { ok: false, error: 'Steam could not be opened. Is it installed?' }; }
 });
+
+// ---------------------------------------------------------------- Steam installs and updates (see steamctl.js)
+const steamJobs = new Map(); // appid -> { id, name, kind, file, state, percent, got, total, speed }
+let steamBusy = false;
+let steamPoll = null;
+let lastRestart = 0;
+const STALL_MS = 3 * 60 * 1000;
+
+const jobList = () => [...steamJobs.values()].map(({ id, name, kind, state, percent, got, total, speed, estimated, live }) => ({ id, name, kind, state, percent: percent || 0, got: got || 0, total: total || 0, speed: speed || 0, estimated: !!estimated, live: live || null }));
+
+// Every change to Steam's files happens here: Steam closed first, and always started again afterwards
+async function withSteamClosed(fn) {
+  if (steamBusy) return { ok: false, error: 'Steam is already restarting' };
+  const root = await steamctl.root();
+  if (!root) return { ok: false, error: 'Steam was not found on this PC' };
+  if (await steamctl.gameRunning()) return { ok: false, error: 'Close your Steam game first, because Steam has to restart' };
+  steamBusy = true;
+  try {
+    await steamctl.shutdown(root);
+    try { fn(root); } finally { steamctl.start(root); lastRestart = Date.now(); }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  } finally { steamBusy = false; }
+}
+
+// a finished install joins the library like any imported Steam game
+async function addInstalledGame(id) {
+  const r = await importers.scan('steam');
+  const c = (r.games || []).find((x) => x.key === `steam:${id}`);
+  const games = loadLibrary();
+  if (!c || games.some((g) => g.sourceKey === c.key)) return;
+  const { key, detail, ...fields } = c;
+  const g = newGame({ ...fields, sourceKey: key });
+  games.push(g);
+  saveLibrary(games);
+  autoArt([g.id]);
+}
+
+async function pollSteamJobs() {
+  const now = Date.now();
+  const snap = (await steamlive.connect()) ? await steamlive.snapshot().catch(() => null) : null;
+  for (const job of [...steamJobs.values()]) {
+    const p = steamctl.progress(job.file);
+    if (p && p.done) {
+      steamJobs.delete(job.id);
+      if (job.kind === 'install') await addInstalledGame(job.id).catch(() => {});
+      send('steam:finished', true, `${job.name} is ${job.kind === 'install' ? 'installed' : 'up to date'}`);
+      steamChecked = 0;
+      refreshSteamState();
+      continue;
+    }
+    if (!p) continue;
+    const live = snap ? steamlive.readOverview(snap.overview, job.id, p.total, p.stage) : null;
+    job.live = live;
+    if (live) {
+      // Steam's own figures: exact, so the estimate below is not used for this game
+      job.state = job.userPaused || live.paused ? 'paused' : /stag|commit|verif|reconfig/i.test(live.state) && (!live.download || live.download.got >= live.download.total) ? 'installing' : 'downloading';
+      job.percent = live.percent;
+      job.total = live.download ? live.download.total : p.total;
+      job.got = live.download ? live.download.got : job.got;
+      job.speed = live.network;
+      job.estimated = false;
+      job.changed = now;
+      continue;
+    }
+    job.state = job.userPaused || p.paused ? 'paused' : p.installing ? 'installing' : p.active ? 'downloading' : 'queued';
+    job.percent = p.percent;
+    job.total = p.total;
+    job.estimated = p.estimated;
+    if (p.got !== job.got) {
+      if (p.got > job.got && job.sampled) job.speed = (p.got - job.got) / ((now - job.sampled) / 1000);
+      job.got = p.got;
+      job.sampled = now;
+      job.changed = now;
+    } else if (now - (job.sampled || now) > 20000) job.speed = 0;
+  }
+  const jobs = [...steamJobs.values()];
+  const anyActive = jobs.some((j) => j.state === 'downloading' || j.state === 'installing');
+  if (anyActive) for (const j of jobs) if (j.state === 'queued') j.changed = now; // waiting its turn, not stuck
+  for (const job of jobs) {
+    if (job.state !== 'queued' || now - job.changed < STALL_MS || job.got) continue;
+    steamJobs.delete(job.id);
+    if (job.kind === 'install') fs.rmSync(job.file, { force: true }); // only our own placeholder: nothing downloaded
+    send('steam:finished', false, job.kind === 'install'
+      ? `${job.name} did not start. Steam only installs games you own.`
+      : `${job.name} did not start updating. Check that Steam is signed in.`);
+  }
+  // Steam pauses games it queued alongside another, so start the next one when nothing is running
+  const next = [...steamJobs.values()].find((j) => j.state === 'paused' && !j.userPaused && (j.resumes || 0) < 3);
+  if (!anyActive && next && !steamBusy && now - lastRestart > 20000) {
+    next.resumes = (next.resumes || 0) + 1;
+    const nudged = snap && await steamlive.command('resume', next.id).then(() => true, () => false);
+    if (!nudged) await withSteamClosed(() => steamctl.markForUpdate(next.file, path.join(userData(), 'steam-backups')));
+  }
+  send('steam:jobs', jobList());
+  if (!steamJobs.size) { clearInterval(steamPoll); steamPoll = null; }
+}
+
+async function startSteamJobs(kind, items) {
+  const todo = items.filter((x) => Number.isInteger(Number(x.id)) && !steamJobs.has(String(x.id)));
+  if (!todo.length) return { ok: false, error: 'Already in progress' };
+  // with a live connection an update is just a request to Steam: no restart and no manifest changes
+  if (kind === 'update' && await steamlive.connect()) {
+    const root = await steamctl.root();
+    const queued = [];
+    for (const x of todo) {
+      const id = String(Number(x.id));
+      const file = root && steamctl.manifestPath(root, id);
+      if (!file) continue;
+      try { await steamlive.command('queue', id); } catch { continue; }
+      steamJobs.set(id, { id, name: x.name, kind, file, state: 'queued', got: 0, changed: Date.now() });
+      queued.push(id);
+    }
+    if (queued.length) {
+      send('steam:jobs', jobList());
+      if (!steamPoll) steamPoll = setInterval(() => pollSteamJobs().catch(() => {}), 1000);
+      return { ok: true, live: true };
+    }
+  }
+  const r = await withSteamClosed((root) => {
+    for (const x of todo) {
+      const id = String(Number(x.id));
+      let file = steamctl.manifestPath(root, id);
+      if (kind === 'install' && file) continue; // already there
+      if (kind === 'update' && !file) continue;
+      if (kind === 'install') file = steamctl.writeInstallManifest(steamctl.roomiestLibrary(root), id, x.name);
+      else steamctl.markForUpdate(file, path.join(userData(), 'steam-backups'));
+      steamJobs.set(id, { id, name: x.name, kind, file, state: 'queued', got: 0, changed: Date.now() });
+    }
+  });
+  if (!r.ok) return r;
+  send('steam:jobs', jobList());
+  if (!steamPoll) steamPoll = setInterval(() => pollSteamJobs().catch(() => {}), 1000);
+  return { ok: true };
+}
+
+async function controlSteamJob(action, id) {
+  const job = steamJobs.get(String(id));
+  if (!job) return { ok: false, error: 'That download has finished' };
+  const backups = path.join(userData(), 'steam-backups');
+  // Steam's own commands take effect at once; an install's partial files still need the restart route below
+  if (action !== 'cancel' || job.kind === 'update') {
+    const sent = (await steamlive.connect()) && await steamlive.command(action === 'cancel' ? 'remove' : action, job.id).then(() => true, () => false);
+    if (sent) {
+      if (action === 'pause') { job.userPaused = true; job.state = 'paused'; job.speed = 0; }
+      if (action === 'resume') { job.userPaused = false; job.resumes = 0; job.state = 'queued'; job.changed = Date.now(); }
+      if (action === 'cancel') steamJobs.delete(job.id);
+      send('steam:jobs', jobList());
+      return { ok: true, live: true };
+    }
+  }
+  const r = await withSteamClosed(() => {
+    if (action === 'pause') { steamctl.pause(job.file); job.userPaused = true; job.state = 'paused'; job.speed = 0; }
+    else if (action === 'resume') { steamctl.markForUpdate(job.file, backups); job.userPaused = false; job.resumes = 0; job.state = 'queued'; job.changed = Date.now(); }
+    else if (action === 'cancel') {
+      if (job.kind === 'install') steamctl.cancelInstall(job.file, job.id); else steamctl.cancelUpdate(job.file);
+      steamJobs.delete(job.id);
+    }
+  });
+  send('steam:jobs', jobList());
+  steamChecked = 0;
+  return r;
+}
+
+ipcMain.handle('steam:control', (_e, action, id) => (['pause', 'resume', 'cancel'].includes(action) ? controlSteamJob(action, id) : { ok: false, error: 'Unknown action' }));
+ipcMain.handle('store:browse', (_e, q) => storeCall(() => store.browse(q || {}, region(), storeFetch)));
+ipcMain.handle('store:tags', () => storeCall(() => store.tags(storeFetch)));
+ipcMain.handle('steam:job', (_e, kind, items) => (kind === 'install' || kind === 'update' ? startSteamJobs(kind, items) : { ok: false, error: 'Unknown job' }));

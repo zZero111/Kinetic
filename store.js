@@ -51,4 +51,49 @@ async function details(id, cc, fetchFn) {
   };
 }
 
-module.exports = { home, search, details };
+// The whole catalogue. Steam only offers this as page fragments, so each result row is read out of the HTML.
+function parseRows(html) {
+  const text = (s) => (s || '').replace(/<[^>]+>/g, '').trim();
+  const rows = [];
+  for (const part of html.split('<a href="https://store.steampowered.com/').slice(1)) {
+    const id = /data-ds-appid="(\d+)/.exec(part)?.[1];
+    const name = /<span class="title">([^<]*)</.exec(part)?.[1];
+    if (!id || !name) continue; // bundles have no single app id
+    const finalCents = /data-price-final="(\d+)"/.exec(part)?.[1];
+    const shownPrice = text(/class="discount_final_price[^"]*">([\s\S]*?)<\/div>/.exec(part)?.[1]);
+    rows.push({
+      id: Number(id), name, image: /<img src="([^"]+)"/.exec(part)?.[1] || '',
+      released: text(/search_released[^>]*>([\s\S]*?)<\/div>/.exec(part)?.[1]),
+      price: shownPrice || (finalCents === '0' ? 'Free' : ''),
+      discount: Number(/data-discount="(\d+)"/.exec(part)?.[1] || 0),
+    });
+  }
+  return rows;
+}
+
+const SORTS = new Set(['', 'Reviews_DESC', 'Released_DESC', 'Price_ASC', 'Price_DESC', 'Name_ASC']);
+async function browse(q, cc, fetchFn) {
+  const type = /^\d+$/.test(q.type || '') ? q.type : '998';
+  const p = new URLSearchParams({ start: String(Number(q.start) || 0), count: '50', infinite: '1', cc, l: 'english', category1: type });
+  const ids = (list) => (Array.isArray(list) ? list : []).filter((x) => /^\d+$/.test(x)).join(',');
+  if (q.term) p.set('term', q.term);
+  if (SORTS.has(q.sort) && q.sort) p.set('sort_by', q.sort);
+  if (ids(q.tags)) p.set('tags', ids(q.tags));
+  if (ids(q.features)) p.set('category2', ids(q.features));
+  if (/^(free|\d+)$/.test(q.maxprice || '')) p.set('maxprice', q.maxprice);
+  const os = (Array.isArray(q.os) ? q.os : []).filter((x) => ['win', 'mac', 'linux'].includes(x)).join(',');
+  if (os) p.set('os', os);
+  if (/^[a-z]+$/.test(q.lang || '')) p.set('supportedlang', q.lang);
+  if (q.specials) p.set('specials', '1');
+  if (q.hideF2p) p.set('hidef2p', '1');
+  const r = await getJson(fetchFn, `https://store.steampowered.com/search/results/?${p}`);
+  return { total: r.total_count || 0, items: parseRows(r.results_html || '') };
+}
+
+let tagCache = null;
+async function tags(fetchFn) {
+  if (!tagCache) tagCache = (await getJson(fetchFn, 'https://store.steampowered.com/tagdata/populartags/english')).slice(0, 60);
+  return tagCache;
+}
+
+module.exports = { home, search, details, browse, tags, parseRows };

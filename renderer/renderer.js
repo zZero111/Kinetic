@@ -244,8 +244,7 @@ function buildFeature(g, list) {
   actions.append(play, details, fav);
   if (g.updateNeeded) {
     const up = el('button', 'btn', 'Update');
-    up.title = 'Opens Steam Downloads, where the update runs';
-    up.onclick = () => steamAction('downloads');
+    up.onclick = () => steamJob('update', [{ id: g.sourceId, name: g.title }]);
     actions.append(up);
   }
   d.append(actions);
@@ -677,6 +676,7 @@ const itemDlg = $('store-item');
 let storeRun = 0; // only the newest request may draw, so a slow reply can't replace a newer search
 let installedIds = new Set();
 let itemId = null;
+let itemName = '';
 
 async function steamAction(action, id) {
   const r = await window.api.steamAction(action, id);
@@ -714,9 +714,9 @@ function storeUpdates(list) {
   if (!list.length) return [];
   const box = el('div', 'store-updates');
   const head = el('div', 'su-head');
-  const go = el('button', 'btn', 'Update in Steam');
+  const go = el('button', 'btn', 'Update all');
   go.type = 'button';
-  go.onclick = () => steamAction('downloads');
+  go.onclick = () => steamJob('update', list);
   head.append(el('h2', 'store-h', `Updates available (${list.length})`), go);
   const names = el('div', 'su-names');
   names.append(...list.map((g) => el('span', 'tag', g.name)));
@@ -724,30 +724,157 @@ function storeUpdates(list) {
   return [box];
 }
 
+// Featured rows show until a search or filter is used; "All games" below is the whole catalogue, loaded as you scroll
+const emptyFilters = () => ({ sort: '', maxprice: '', type: '998', lang: '', tags: [], features: [], os: [], specials: false, hideF2p: false });
+const browseQ = emptyFilters();
+let browseStart = 0, browseTotal = 0, browseLoading = false, browseGrid = null, browseHead = null;
+const filterCount = () => browseQ.tags.length + browseQ.features.length + browseQ.os.length + [browseQ.maxprice, browseQ.lang, browseQ.specials, browseQ.hideF2p, browseQ.type !== '998'].filter(Boolean).length;
+const filtering = () => !!($('search').value.trim() || browseQ.sort || filterCount());
+
+function browseCard(x) {
+  const b = el('button', 'store-card wide');
+  b.type = 'button';
+  const img = el('img');
+  img.src = x.image;
+  img.alt = '';
+  img.loading = 'lazy';
+  const foot = el('div', 'sc-foot');
+  foot.append(el('span', 'sc-date', x.released));
+  if (x.discount) foot.append(el('span', 'sc-off', `-${x.discount}%`));
+  foot.append(el('span', 'sc-price', installedIds.has(String(x.id)) ? 'Installed' : x.price));
+  b.append(img, el('div', 'sc-name', plainText(x.name)), foot);
+  b.onclick = () => openStoreItem(x.id);
+  return b;
+}
+
+async function loadMore(run) {
+  if (browseLoading || (browseStart && browseStart >= browseTotal)) return;
+  browseLoading = true;
+  const r = await window.api.storeBrowse({ ...browseQ, term: $('search').value.trim(), start: browseStart });
+  if (run !== storeRun) return;
+  browseLoading = false;
+  if (!r.ok) { browseHead.textContent = 'Could not load the store'; return; }
+  browseTotal = r.data.total;
+  browseStart += 50;
+  browseHead.textContent = `${filtering() ? 'Results' : 'All games'} (${browseTotal.toLocaleString()})`;
+  browseGrid.append(...r.data.items.map(browseCard));
+  if (!browseTotal) browseGrid.replaceChildren(el('p', 'store-msg', 'Nothing matches these filters.'));
+  fillStore(run);
+}
+const fillStore = (run) => { if (storeEl.scrollHeight - storeEl.scrollTop - storeEl.clientHeight < 900) loadMore(run); };
+storeEl.addEventListener('scroll', () => fillStore(storeRun), { passive: true });
+
+// the same ids Steam's search page uses
+const STORE_FEATURES = [['2', 'Single-player'], ['1', 'Multi-player'], ['9', 'Co-op'], ['49', 'PvP'], ['28', 'Full controller support'], ['22', 'Achievements'], ['23', 'Cloud saves'], ['30', 'Workshop'], ['29', 'Trading cards']];
+const STORE_TYPES = [['998', 'Games'], ['21', 'DLC'], ['994', 'Software'], ['10', 'Demos']];
+const STORE_OS = [['win', 'Windows'], ['mac', 'macOS'], ['linux', 'Linux / SteamOS']];
+const STORE_LANGS = [['', 'Any language'], ['english', 'English'], ['french', 'French'], ['german', 'German'], ['spanish', 'Spanish'], ['italian', 'Italian'], ['japanese', 'Japanese'], ['koreana', 'Korean'], ['russian', 'Russian'], ['schinese', 'Chinese (Simplified)'], ['brazilian', 'Portuguese (Brazil)']];
+const STORE_PRICES = [['', 'Any price'], ['free', 'Free'], ['5', 'Under 5'], ['10', 'Under 10'], ['20', 'Under 20'], ['40', 'Under 40']];
+const STORE_SORTS = [['', 'Relevance'], ['Reviews_DESC', 'Top rated'], ['Released_DESC', 'Newest'], ['Price_ASC', 'Lowest price'], ['Price_DESC', 'Highest price'], ['Name_ASC', 'Name']];
+let tagOptions = [];
+let featuredBox = null, clearBtn = null;
+
+// only the results reload, so the panel keeps its place and open sections
+function filterChanged() {
+  if (!browseGrid) { showStore(); return; }
+  const run = ++storeRun;
+  browseStart = 0; browseTotal = 0; browseLoading = false;
+  featuredBox.hidden = filtering();
+  clearBtn.hidden = !filterCount();
+  clearBtn.textContent = `Clear filters (${filterCount()})`;
+  browseGrid.replaceChildren();
+  browseHead.textContent = 'Loading…';
+  browseHead.scrollIntoView({ block: 'nearest' });
+  loadMore(run);
+}
+
+function storeSelect(key, options, title) {
+  const sel = el('select');
+  sel.title = title;
+  for (const [value, label] of options) sel.append(new Option(label, value));
+  sel.value = browseQ[key];
+  sel.onchange = () => { browseQ[key] = sel.value; filterChanged(); };
+  return sel;
+}
+
+function filterCheck(label, checked, change) {
+  const row = el('label', 'sf-check');
+  const box = el('input');
+  box.type = 'checkbox';
+  box.checked = checked;
+  box.onchange = () => change(box.checked);
+  row.append(box, document.createTextNode(label));
+  return row;
+}
+
+const filterList = (key, options) => options.map(([id, label]) => filterCheck(label, browseQ[key].includes(id), (on) => {
+  browseQ[key] = on ? [...browseQ[key], id] : browseQ[key].filter((x) => x !== id);
+  filterChanged();
+}));
+
+function filterSection(title, children, open) {
+  const d = el('details', 'sf-sec');
+  d.open = !!open;
+  d.append(el('summary', '', title), ...children);
+  return d;
+}
+
+function storeSidebar() {
+  const side = el('aside', 'store-side');
+  clearBtn = el('button', 'sf-clear');
+  clearBtn.type = 'button';
+  clearBtn.hidden = !filterCount();
+  clearBtn.textContent = `Clear filters (${filterCount()})`;
+  clearBtn.onclick = () => { Object.assign(browseQ, emptyFilters()); showStore(); };
+  const find = el('input', 'sf-find');
+  find.placeholder = 'Find a tag';
+  const tagBox = el('div', 'sf-tags');
+  tagBox.append(...filterList('tags', tagOptions));
+  find.oninput = () => {
+    const q = find.value.trim().toLowerCase();
+    for (const row of tagBox.children) row.hidden = !row.textContent.toLowerCase().includes(q);
+  };
+  side.append(clearBtn,
+    filterSection('Price', [storeSelect('maxprice', STORE_PRICES, 'Price'),
+      filterCheck('Special offers only', browseQ.specials, (on) => { browseQ.specials = on; filterChanged(); }),
+      filterCheck('Hide free to play', browseQ.hideF2p, (on) => { browseQ.hideF2p = on; filterChanged(); })], true),
+    filterSection('Tags', [find, tagBox], true),
+    filterSection('Type', [storeSelect('type', STORE_TYPES, 'Type')]),
+    filterSection('Features', filterList('features', STORE_FEATURES)),
+    filterSection('Platform', filterList('os', STORE_OS)),
+    filterSection('Language', [storeSelect('lang', STORE_LANGS, 'Language')]));
+  return side;
+}
+
 async function showStore() {
   const run = ++storeRun;
   storeEl.replaceChildren(el('p', 'store-msg', 'Loading the Steam store…'));
-  const r = await window.api.storeHome();
+  const [r, t] = await Promise.all([window.api.storeHome(), tagOptions.length ? null : window.api.storeTags()]);
   if (run !== storeRun) return;
-  if (!r.ok) { storeEl.replaceChildren(el('p', 'store-msg', `Could not reach the Steam store. ${r.error}`)); return; }
+  if (t && t.ok) tagOptions = t.data.map((x) => [String(x.tagid), x.name]);
+  if (!r.ok) { browseGrid = null; storeEl.replaceChildren(el('p', 'store-msg', `Could not reach the Steam store. ${r.error}`)); return; }
   installedIds = new Set(r.data.installed);
-  storeEl.replaceChildren(...storeUpdates(r.data.updates), ...storeRow('Top sellers', r.data.topSellers), ...storeRow('Specials', r.data.specials), ...storeRow('New releases', r.data.newReleases));
+  browseStart = 0; browseTotal = 0; browseLoading = false;
+  browseGrid = el('div', 'store-grid browse');
+  browseHead = el('h2', 'store-h', 'All games');
+  featuredBox = el('div');
+  featuredBox.append(...storeRow('Top sellers', r.data.topSellers), ...storeRow('Specials', r.data.specials), ...storeRow('New releases', r.data.newReleases));
+  featuredBox.hidden = filtering();
+  const head = el('div', 'store-results-head');
+  head.append(browseHead, storeSelect('sort', STORE_SORTS, 'Sort'));
+  const main = el('div', 'store-main');
+  main.append(featuredBox, head, browseGrid);
+  const cols = el('div', 'store-cols');
+  cols.append(main, storeSidebar());
+  storeEl.replaceChildren(...storeUpdates(r.data.updates), cols);
   storeEl.scrollTop = 0;
+  loadMore(run);
 }
 
 let storeTimer = 0;
 function storeTyped() {
   clearTimeout(storeTimer);
-  storeTimer = setTimeout(async () => {
-    const term = $('search').value.trim();
-    if (!term) { showStore(); return; }
-    const run = ++storeRun;
-    const r = await window.api.storeSearch(term);
-    if (run !== storeRun) return;
-    if (!r.ok) { storeEl.replaceChildren(el('p', 'store-msg', r.error)); return; }
-    storeEl.replaceChildren(...(r.data.length ? storeRow(`Results for “${term}”`, r.data) : [el('p', 'store-msg', `Nothing found for “${term}”.`)]));
-    storeEl.scrollTop = 0;
-  }, 250);
+  storeTimer = setTimeout(filterChanged, 300);
 }
 
 // Steam's descriptions can contain HTML entities; this reads them as plain text
@@ -776,10 +903,125 @@ async function openStoreItem(id) {
   for (const s of d.screenshots) { const i = el('img'); i.src = s; i.alt = ''; i.loading = 'lazy'; shots.append(i); }
   body.replaceChildren(hero, el('h2', '', d.name), meta, el('p', 'si-desc', plainText(d.description)),
     el('p', 'hint-text', [d.developers.join(', '), d.released].filter(Boolean).join(' · ')), shots);
-  $('si-install').hidden = !d.free || installedIds.has(String(id));
+  const owned = installedIds.has(String(id));
+  $('si-install').hidden = owned || d.comingSoon;
+  $('si-open').hidden = d.free || owned;
+  itemName = d.name;
 }
 $('si-open').onclick = () => steamAction('page', itemId);
-$('si-install').onclick = () => steamAction('install', itemId);
+$('si-install').onclick = () => {
+  if (!confirm(`Install ${itemName}?\n\nSteam restarts in the background to start the download. This only works for games you own or free games.`)) return;
+  itemDlg.close('cancel');
+  steamJob('install', [{ id: itemId, name: itemName }]);
+};
+
+async function steamJob(kind, items) {
+  const r = await window.api.steamJob(kind, items);
+  if (!r.ok) toast(r.error, true);
+}
+
+const fmtBytes = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
+function fmtLeft(sec) {
+  if (sec < 60) return 'under a minute left';
+  const m = Math.round(sec / 60);
+  return m < 60 ? `${m} min left` : `${Math.floor(m / 60)} h ${m % 60} min left`;
+}
+const JOB_STATE = { queued: 'Queued', downloading: 'Downloading', installing: 'Installing', paused: 'Paused' };
+
+const fmtRate = (b) => `${(b * 8 / 1e6).toFixed(1)} Mbps`;
+const fmtClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+function jobDetail(j) {
+  if (j.live) {
+    const l = j.live, parts = [];
+    if (l.network) parts.push(`Network ${fmtRate(l.network)}`);
+    if (l.peak) parts.push(`Peak ${fmtRate(l.peak)}`);
+    if (l.disk) parts.push(`Disk ${fmtRate(l.disk)}`);
+    if (l.eta > 0) parts.push(`${fmtClock(l.eta)} remaining`);
+    return parts.join(' · ');
+  }
+  const parts = [];
+  if (j.total) parts.push(`${j.estimated ? 'About ' : ''}${fmtBytes(j.got)} of ${fmtBytes(j.total)}`);
+  if (j.state === 'downloading' && j.speed) {
+    parts.push(`${fmtBytes(j.speed)}/s`);
+    if (j.total > j.got) parts.push(fmtLeft((j.total - j.got) / j.speed));
+  }
+  return parts.join(' · ');
+}
+
+async function jobControl(action, j, btn) {
+  if (action === 'cancel' && !confirm(j.kind === 'install' ? `Cancel installing ${j.name}? The partial download is deleted.` : `Cancel updating ${j.name}? Steam will try again in about a week, or when you press Update.`)) return;
+  btn.disabled = true;
+  const r = await window.api.steamControl(action, j.id);
+  if (!r.ok) { btn.disabled = false; toast(r.error, true); }
+}
+
+// rows are updated in place, so a button can't vanish mid-click when progress arrives
+const jobRows = new Map();
+function jobRow(j) {
+  const row = el('div', 'job');
+  const name = el('div', 'job-name', j.name), state = el('div', 'job-pct'), detail = el('div', 'job-detail');
+  const bar = el('div', 'bar'), fill = el('i');
+  bar.append(fill);
+  const stages = el('div', 'job-stages');
+  const toggle = el('button', 'job-btn'), cancel = el('button', 'job-btn', 'Cancel');
+  const btns = el('div', 'job-btns');
+  btns.append(toggle, cancel);
+  row.append(name, state, bar, stages, detail, btns);
+  const r = { row, state, detail, fill, bar, stages, toggle, cancel, job: j };
+  toggle.onclick = () => jobControl(r.job.state === 'paused' ? 'resume' : 'pause', r.job, toggle);
+  cancel.onclick = () => jobControl('cancel', r.job, cancel);
+  return r;
+}
+
+// Steam's two progress lines, shown when its exact figures are available
+function stageLine(label, s, bytes) {
+  const line = el('div', 'job-stage');
+  const pct = s.total ? Math.min(100, Math.floor((s.got / s.total) * 100)) : 0;
+  const bar = el('div', 'bar'), fill = el('i');
+  fill.style.width = pct + '%';
+  bar.append(fill);
+  line.append(el('span', '', label), el('span', '', bytes ? `${fmtBytes(s.got)} / ${fmtBytes(s.total)}` : `${pct}%`), bar);
+  return line;
+}
+function drawStages(r, j) {
+  const l = j.live;
+  r.bar.hidden = !!l;
+  r.stages.replaceChildren(...(l ? [l.download && stageLine('Downloading data', l.download, true), l.files && stageLine('Updating files', l.files, false)].filter(Boolean) : []));
+}
+
+let jobsOpen = localStorage.getItem('jobsOpen') !== '0';
+function drawJobs(list) {
+  const box = $('jobs');
+  box.hidden = !list.length;
+  box.classList.toggle('closed', !jobsOpen);
+  const active = list.find((j) => j.state === 'downloading' || j.state === 'installing');
+  $('jobs-title').textContent = `Downloads (${list.length})`;
+  $('jobs-sum').textContent = active ? `${active.name} ${active.percent}%` : '';
+  $('jobs-toggle').textContent = jobsOpen ? '▾' : '▴';
+  const seen = new Set();
+  for (const j of list) {
+    seen.add(j.id);
+    if (!jobRows.has(j.id)) { const r = jobRow(j); jobRows.set(j.id, r); $('jobs-list').append(r.row); }
+    const r = jobRows.get(j.id);
+    const was = r.job.state;
+    r.job = j;
+    r.state.textContent = `${JOB_STATE[j.state] || 'Starting'}${j.percent ? ' ' + j.percent + '%' : ''}`;
+    r.detail.textContent = jobDetail(j);
+    r.fill.style.width = j.percent + '%';
+    drawStages(r, j);
+    r.toggle.textContent = j.state === 'paused' ? 'Resume' : 'Pause';
+    if (was !== j.state) { r.toggle.disabled = false; r.cancel.disabled = false; }
+  }
+  for (const [id, r] of jobRows) if (!seen.has(id)) { r.row.remove(); jobRows.delete(id); }
+}
+let lastJobs = [];
+$('jobs-head').onclick = () => { jobsOpen = !jobsOpen; localStorage.setItem('jobsOpen', jobsOpen ? '1' : '0'); drawJobs(lastJobs); };
+window.api.onSteamJobs((list) => { lastJobs = list; drawJobs(list); });
+window.api.onSteamFinished((ok, msg) => {
+  toast(msg, !ok);
+  refresh(true);
+});
 
 // ---- updates
 let pendingUpdate = null;

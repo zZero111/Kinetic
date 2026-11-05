@@ -21,7 +21,7 @@
     </div>
     <div class="tools">
       <button class="icon-btn update-btn" id="update-btn" hidden>Update</button>
-      <input id="search" type="search" placeholder="SEARCH">
+      <input id="search" type="search" placeholder="SEARCH" aria-label="Search">
       <select id="sort" title="Sort">
         <option value="name">Name</option>
         <option value="last">Last played</option>
@@ -61,6 +61,10 @@
   </footer>
 </div>
 <div id="toast"></div>
+<div id="jobs" hidden>
+  <button id="jobs-head" type="button"><b id="jobs-title">Downloads</b><span id="jobs-sum"></span><i id="jobs-toggle"></i></button>
+  <div id="jobs-list"></div>
+</div>
 
 <!-- Details / edit -->
 <dialog id="edit">
@@ -130,7 +134,7 @@
 <dialog id="store-item">
   <form method="dialog">
     <div id="si-body"></div>
-    <div class="row settings-actions"><span class="spacer"></span><button value="cancel">Close</button><button type="button" id="si-install">Install with Steam</button><button type="button" id="si-open" class="primary">Open in Steam</button></div>
+    <div class="row settings-actions"><span class="spacer"></span><button value="cancel">Close</button><button type="button" id="si-open">Buy in Steam</button><button type="button" id="si-install" class="primary">Install</button></div>
   </form>
 </dialog>
 
