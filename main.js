@@ -69,6 +69,15 @@ function newGame(fields) {
   };
 }
 
+// Early GOG imports stored a registry line as the launch arguments
+function repairImportedArgs() {
+  const games = loadLibrary();
+  const bad = games.filter((g) => /\bREG_[A-Z_]+\b/.test(g.args || ''));
+  if (!bad.length) return;
+  for (const g of bad) g.args = '';
+  saveLibrary(games);
+}
+
 // ---------------------------------------------------------------- window / tray
 function showWindow() {
   if (!win) return createWindow();
@@ -189,6 +198,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     const id = launchArg(process.argv);
+    repairImportedArgs();
     createWindow();
     if (loadSettings().discordId) setTimeout(discordConnect, 3000);
     if (app.isPackaged) fs.rm(path.join(process.resourcesPath, 'app.asar.new'), { force: true }, () => {}); // leftover from a failed update
@@ -615,6 +625,16 @@ async function launchFromShortcut(id) {
   send('library:changed');
 }
 
+// The folder to watch after a game's exe exits. Empty for shared places, where unrelated programs also run.
+function watchFolderFor(exe, cwd) {
+  const dir = path.resolve(cwd && fs.existsSync(cwd) ? cwd : path.dirname(exe));
+  const shared = [process.env.windir, process.env.ProgramFiles, process.env['ProgramFiles(x86)'], app.getPath('desktop'), app.getPath('home')]
+    .filter(Boolean).map((d) => d.toLowerCase());
+  const lower = dir.toLowerCase();
+  if (dir === path.parse(dir).root || shared.some((d) => lower === d || (d.endsWith('windows') && lower.startsWith(d + path.sep)))) return '';
+  return dir + path.sep;
+}
+
 async function launchExe(g) {
   const id = g.id;
   const args = splitArgs(g.args);
@@ -664,16 +684,19 @@ async function launchExe(g) {
     done = true;
     endSession(id, started, code, err, "If it is an Azimuth game, check Azimuth's own log.", !err, endTime);
   };
-  // Azimuth may hand the game to another process and exit, so for Azimuth titles keep the game "running"
-  // (play time, Discord status) while anything is still running from the title's folder or azimuth.exe itself.
+  // Azimuth and many PC games start through a small launcher that hands over and exits, so the game stays
+  // "running" (play time, Discord, Play disabled) while anything still runs from its folder.
   child.on('exit', async (code) => {
     let lastSeen = Date.now();
-    if (g.azimuth) {
-      const folder = azimuthFolder(g.azimuth, g.titleId);
+    const folder = g.azimuth ? azimuthFolder(g.azimuth, g.titleId) : watchFolderFor(exe, g.cwd);
+    if (g.azimuth || folder) {
+      // something that ran for a while was probably the game itself, so don't wait as long to confirm it closed
+      const allowed = !g.azimuth && lastSeen - started > 60000 ? 1 : 2;
       let misses = 0;
       await sleep(5000);
-      while (misses < 2) {
-        if (await gameProcessAlive(folder, child.pid)) { misses = 0; lastSeen = Date.now(); } else misses++;
+      while (true) {
+        if (await gameProcessAlive(folder, child.pid, !!g.azimuth)) { misses = 0; lastSeen = Date.now(); } else misses++;
+        if (misses >= allowed) break;
         await sleep(8000);
       }
     }

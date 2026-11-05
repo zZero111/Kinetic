@@ -99,7 +99,7 @@ async function scanGog() {
   const games = [];
   for (const b of blocks) {
     if (!/GOG\.com\\Games\\\d+\s*$/m.test(b.split(/\r?\n/)[0] || '')) continue;
-    const val = (k) => new RegExp(`^\\s+${k}\\s+REG_\\w+\\s+(.*)$`, 'm').exec(b)?.[1]?.trim() || '';
+    const val = (k) => new RegExp(`^[ \\t]+${k}[ \\t]+REG_\\w+[ \\t]*(.*)$`, 'm').exec(b)?.[1]?.trim() || '';
     const id = val('gameID') || /\\(\d+)\s*$/.exec(b.split(/\r?\n/)[0])?.[1];
     const name = val('gameName');
     const exe = val('exe');
