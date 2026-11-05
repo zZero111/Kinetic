@@ -163,3 +163,7 @@ body::before { width: min(26vw, 420px); height: min(14vh, 120px); }
 .tools { min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
 #search { width: clamp(60px, 6vw, 110px); min-width: 0; flex: 0 1 auto; }
 .pager { flex: none; }
+
+/* version number beside the Settings heading */
+.with-version { display: flex; align-items: baseline; justify-content: space-between; }
+.with-version small { font-family: var(--font-body); font-size: 14px; font-weight: 400; color: var(--text-dim); text-transform: none; }

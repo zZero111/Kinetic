@@ -4,6 +4,15 @@
   "description": "Desktop launcher for recompiled games",
   "author": "Azuren",
   "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "node scripts/pack.js",
+    "release": "node scripts/release.js"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^33.0.0"
+  },
   "dependencies": {
     "@xhayper/discord-rpc": "^1.5.1"
   }

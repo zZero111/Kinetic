@@ -441,6 +441,7 @@ $('open-settings').onclick = async () => {
   $('s-after').value = s.afterLaunch || 'stay';
   $('s-repo').value = s.updateRepo || '';
   $('s-autoupdate').checked = s.autoUpdate !== false;
+  $('s-version-top').textContent = `v${ui.version}`;
   $('s-version').textContent = `Installed version ${ui.version}` + (ui.packaged ? '' : ' (running from source)');
   $('s-update-install').hidden = !pendingUpdate;
   $('s-update-msg').textContent = pendingUpdate ? ` Version ${pendingUpdate.version} is available` : '';
