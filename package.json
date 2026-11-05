@@ -11,7 +11,8 @@
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "hls.js": "^1.7.4"
   },
   "dependencies": {
     "@xhayper/discord-rpc": "^1.5.1",

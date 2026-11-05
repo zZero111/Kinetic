@@ -143,6 +143,8 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, spellcheck: false },
   });
   const w = win;
+  // opens the connection to Steam's image server now, so the first Store images don't wait for it
+  win.webContents.session.preconnect({ url: 'https://shared.akamai.steamstatic.com', numSockets: 4 });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   if (hidden) createTray();
   else {
@@ -171,7 +173,8 @@ function createWindow() {
     if (input.type === 'keyDown' && input.key === 'F11') win.setFullScreen(!win.isFullScreen());
     if (input.type === 'keyDown' && input.key === 'Escape' && buyView) { _e.preventDefault(); closeBuyView(); }
   });
-  win.on('focus', () => { if (startupDone) { syncAzimuth(); refreshSteamState(); } });
+  win.on('focus', () => { send('window:active', true); if (startupDone) { syncAzimuth(); refreshSteamState(); } });
+  win.on('blur', () => send('window:active', false));
   win.on('close', (e) => {
     if (app.isQuitting) return;
     const gameRunning = running.size > 0; // quitting now would lose the session's play time
@@ -1059,13 +1062,28 @@ async function refreshSteamState() {
   } catch {}
 }
 
-ipcMain.handle('store:home', () => storeCall(async () => {
-  steamChecked = 0;
+// add Epic, GOG or Xbox here once they have a module with the same shape as store.js
+const storeProviders = { steam: store };
+const provider = (id) => storeProviders[id] || store;
+
+// answers are kept for a few minutes, so moving around the Store rarely waits on the network
+const storeCache = new Map();
+function cached(key, ms, make) {
+  const hit = storeCache.get(key);
+  if (hit && Date.now() - hit.at < ms) return hit.value;
+  const value = make();
+  storeCache.set(key, { at: Date.now(), value });
+  Promise.resolve(value).catch(() => storeCache.delete(key)); // a failed answer must not be remembered
+  if (storeCache.size > 300) storeCache.delete(storeCache.keys().next().value);
+  return value;
+}
+
+ipcMain.handle('store:home', (_e, source) => storeCall(async () => {
   await refreshSteamState();
-  return { ...(await store.home(region(), storeFetch)), updates: steamGames.filter((g) => g.update), installed: steamGames.filter((g) => !g.unfinished).map((g) => g.id) };
+  return { ...(await provider(source).home(region(), storeFetch)), updates: steamGames.filter((g) => g.update), installed: steamGames.filter((g) => !g.unfinished).map((g) => g.id) };
 }));
 ipcMain.handle('store:search', (_e, term) => storeCall(() => store.search(String(term), region(), storeFetch)));
-ipcMain.handle('store:details', (_e, id) => storeCall(() => store.details(Number(id), region(), storeFetch)));
+ipcMain.handle('store:details', (_e, id, source) => storeCall(() => cached(`d${source}${id}`, 600000, () => provider(source).details(Number(id), region(), storeFetch))));
 
 // Steam has no documented "update this game" command, so updates run from its Downloads page
 ipcMain.handle('store:steam', async (_e, action, id) => {
@@ -1326,8 +1344,8 @@ async function adoptUnfinishedInstalls() {
 }
 
 ipcMain.handle('steam:control', (_e, action, id) => (['pause', 'resume', 'cancel'].includes(action) ? controlSteamJob(action, id) : { ok: false, error: 'Unknown action' }));
-ipcMain.handle('store:browse', (_e, q) => storeCall(() => store.browse(q || {}, region(), storeFetch)));
-ipcMain.handle('store:tags', () => storeCall(() => store.tags(storeFetch)));
+ipcMain.handle('store:browse', (_e, q) => storeCall(() => cached(`b${JSON.stringify(q)}`, 300000, () => provider(q && q.source).browse(q || {}, region(), storeFetch))));
+ipcMain.handle('store:tags', (_e, source) => storeCall(() => provider(source).tags(storeFetch)));
 ipcMain.handle('steam:job', (_e, kind, items) => (kind === 'install' || kind === 'update' ? startSteamJobs(kind, items) : { ok: false, error: 'Unknown job' }));
 
 // ---------------------------------------------------------------- buying
@@ -1382,9 +1400,10 @@ function closeBuyView() {
   send('buy:state', { open: false });
 }
 
-ipcMain.handle('store:buy', (_e, id, name) => {
+ipcMain.handle('store:buy', (_e, id, name, pageUrl) => {
   const appid = Number(id);
-  if (!Number.isInteger(appid) || !win) return { ok: false, error: 'Unknown game' };
+  const page = /^https:\/\/store\.steampowered\.com\//.test(pageUrl || '') ? pageUrl : `https://store.steampowered.com/app/${appid}/`;
+  if ((!pageUrl && !appid) || !Number.isInteger(appid) || !win) return { ok: false, error: 'Unknown game' };
   closeBuyView();
   buyView = new WebContentsView({ webPreferences: buyPrefs });
   guardBuySession(buyView.webContents.session);
@@ -1413,13 +1432,13 @@ ipcMain.handle('store:buy', (_e, id, name) => {
   });
   buyReady = false;
   setTimeout(() => { buyReady = true; }, 8000); // a page that never finishes loading must not lock the D-pad
-  buyView.webContents.loadURL(`https://store.steampowered.com/app/${appid}/`);
+  buyView.webContents.loadURL(page);
   keepPadFocus();
   send('buy:state', { open: true, host: 'store.steampowered.com' });
 
   // Steam adds a bought game to the account by itself, so ownership shows when the purchase is complete
   const check = async () => {
-    if (!(await steamlive.connect())) return;
+    if (!appid || !(await steamlive.connect())) return;
     if (await steamlive.owned(appid).catch(() => false)) {
       clearInterval(buyTimer);
       send('store:bought', appid, name);

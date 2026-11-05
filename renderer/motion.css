@@ -266,3 +266,177 @@ body.pad :focus { outline: 3px solid #fff; outline-offset: 2px; }
 #buy-close { background: #1b1e2d; border: 1px solid #343850; padding: 7px 12px; }
 #buy-host { font-family: var(--font-body); font-weight: 600; }
 #buy-hints { margin-left: auto; color: var(--text-dim); font-size: 15px; }
+
+/* ---------- store page ---------- */
+.in-store footer { height: 56px; padding-bottom: 8px; }
+.in-store footer > * { display: flex; }
+.in-store #store { margin: 14px -14px 0 0; }
+.in-store #search { width: 200px; }
+.store-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.store-btn { transform: skewX(var(--skew)); background: transparent; border: 2px solid #fff; padding: 7px 16px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; }
+.store-btn:hover { background: #fff; color: #000; }
+.store-btn.hot { background: var(--accent); border-color: var(--accent); }
+.store-sort { transform: skewX(var(--skew)); text-transform: uppercase; }
+.store-pager { display: flex; align-items: center; gap: 10px; }
+.store-arrow { transform: skewX(var(--skew)); width: 46px; height: 38px; background: transparent; border: 2px solid #fff; font-size: 22px; line-height: 1; }
+.store-arrow.red { background: var(--accent); border-color: var(--accent); }
+#store-count { font-size: 34px; font-weight: 800; transform: skewX(var(--skew)); }
+#store-count b { color: #fff; }
+.store-hero-row { display: flex; gap: 14px; height: min(62vh, 560px); }
+.store-hero-row #feature { flex: 1; }
+.store-hero-row .strip .soff { position: relative; background: var(--accent); padding: 1px 6px; font-weight: 800; margin-top: 6px; }
+.sec-head { display: flex; align-items: center; gap: 14px; margin: 30px 0 12px; }
+.sec-head .store-h { margin: 0; font-size: 38px; }
+.sec-sub { color: var(--text-dim); letter-spacing: 3px; text-transform: uppercase; font-size: 16px; }
+.offers { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+.offer { padding: 0; background: var(--panel); border: 1px solid #262a3a; text-align: left; display: flex; flex-direction: column; transition: transform .12s; }
+.offer:hover, .tile:hover { transform: translateY(-3px); }
+.offer-art { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-bottom: 2px solid var(--accent); background: hsl(var(--hue), 40%, 20%); }
+.offer-art img, .tile-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.num { position: absolute; left: 12px; top: 8px; color: var(--accent); font-size: 28px; font-weight: 800; text-shadow: 2px 2px 0 rgba(0,0,0,.6); }
+.off { position: absolute; right: 10px; top: 10px; background: var(--accent); padding: 2px 10px; font-size: 20px; font-weight: 800; transform: skewX(var(--skew)); }
+.offer-foot { padding: 10px 12px; }
+.offer-name { font-size: 20px; font-weight: 800; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.price-line { display: flex; align-items: baseline; gap: 8px; }
+.price-line b { font-size: 22px; font-weight: 800; }
+.price-line s { color: var(--text-dim); font-size: 14px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 16px; padding-bottom: 20px; }
+.tile { padding: 0; background: transparent; border: 0; text-align: left; transition: transform .12s; }
+.tile-art { position: relative; aspect-ratio: 3 / 4; overflow: hidden; border: 2px solid hsl(var(--hue), 50%, 50%); background: hsl(var(--hue), 40%, 20%); }
+.tile:hover .tile-art, .tile:focus .tile-art { border-color: var(--accent); }
+.tile-art .fallback { object-position: center; }
+.tile-art::after { content: ""; position: absolute; inset: 40% 0 0; background: linear-gradient(transparent, rgba(0,0,0,.85)); }
+.tile-name { position: absolute; left: 12px; right: 10px; bottom: 10px; z-index: 1; font-size: 22px; line-height: 1; font-weight: 800; text-transform: uppercase; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tile-art .num, .tile-art .off { z-index: 1; }
+.tile-art .off { font-size: 16px; padding: 1px 7px; }
+.tile-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-top: 6px; padding-top: 6px; border-top: 2px solid var(--accent); }
+.tile-rate { color: var(--text-dim); font-size: 14px; letter-spacing: 1px; }
+.store-side { position: fixed; top: 0; right: 0; bottom: 0; width: 290px; max-height: none; z-index: 30; box-shadow: -12px 0 30px rgba(0,0,0,.6); }
+.cart-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid #1b1e2d; }
+
+/* featured card: long titles and descriptions must not push the buttons out */
+.store-hero-row { height: clamp(430px, 58vh, 560px); }
+.store-hero .detail { justify-content: center; overflow: hidden; }
+.store-hero .dnum { font-size: clamp(30px, 5vh, 46px); }
+.store-hero .dline { margin-bottom: 4px; min-height: 34px; }
+.store-hero .tag:empty { display: none; }
+.store-hero .dtitle { font-size: clamp(28px, 5.4vh, 54px); margin-bottom: 4px; -webkit-line-clamp: 1; }
+.store-hero .ddesc { font-size: 15px; margin-bottom: 8px; min-height: 2.6em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.store-hero .stat { padding: 2px 0; }
+.store-hero .stat span { font-size: clamp(16px, 2.6vh, 24px); }
+.store-hero .bar { margin: 8px 0 10px; }
+.store-hero .actions { flex-wrap: nowrap; }
+.store-hero .btn { padding-top: 8px; padding-bottom: 8px; }
+.offers { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.offer { min-width: 0; align-items: stretch; }
+.offer-art { flex: none; width: 100%; height: clamp(110px, 16vh, 170px); aspect-ratio: auto; }
+
+/* store: calmer, closer to Steam's layout */
+.in-store footer { display: none; }
+.in-store #store { margin: 12px -14px 0 -10px; padding: 0 14px 28px 10px; }
+.store-bar { padding: 2px 4px; }
+.store-btn { font-size: 15px; padding: 5px 14px; border-width: 1px; border-color: var(--line); letter-spacing: 1px; }
+.store-arrow { width: 38px; height: 32px; border-width: 1px; border-color: var(--line); font-size: 18px; }
+.store-arrow.red { background: transparent; border-color: var(--line); }
+#store-count { font-size: 20px; color: var(--text-dim); }
+.store-hero-row { height: clamp(320px, 44vh, 430px); }
+.store-hero .stat:nth-child(3) { display: none; }
+.store-hero .bar { display: none; }
+.store-hero .dnum { display: none; }
+.store-hero .actions { margin-top: 12px; }
+.store-hero-row .strip { width: 76px; }
+.store-hero-row .snum, .store-hero-row .sdot { display: none; }
+.store-hero-row .strip .sname { font-size: 24px; }
+.sec-head { margin: 26px 0 8px; }
+.sec-head .store-h { font-family: var(--font-body); font-size: 20px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.sec-sub { font-family: var(--font-body); font-size: 13px; letter-spacing: 0; text-transform: none; }
+.offers { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.offers .offer:nth-child(n+5) { display: none; }
+.offer { border: 0; }
+.offer-art { height: auto; aspect-ratio: 460 / 215; border-bottom: 0; }
+.offer-name { font-family: var(--font-body); font-size: 14px; font-weight: 600; text-transform: none; }
+.offer-foot { padding: 8px 10px; }
+.price-line b { font-family: var(--font-body); font-size: 14px; font-weight: 600; }
+.price-line s { font-size: 12px; }
+.off { font-family: var(--font-body); right: 8px; top: 8px; padding: 1px 6px; font-size: 13px; font-weight: 700; transform: none; }
+.tiles { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px 12px; }
+.tile-art { aspect-ratio: 460 / 215; border: 0; }
+.tile-art::after { display: none; }
+.tile:focus .tile-art, .tile:hover .tile-art { outline: 2px solid #fff; outline-offset: 1px; }
+.tile-art .off { font-size: 13px; padding: 1px 6px; }
+.tile-name { position: static; margin-top: 6px; font-family: var(--font-body); font-size: 14px; font-weight: 600; line-height: 1.25; text-transform: none; -webkit-line-clamp: 1; }
+.tile-foot { margin-top: 2px; padding-top: 0; border-top: 0; }
+.tile-rate { font-family: var(--font-body); font-size: 12px; letter-spacing: 0; }
+.sf-close { width: 100%; background: #1b1e2d; border: 1px solid #343850; padding: 7px; margin-bottom: 6px; font-weight: 700; }
+.sf-close:hover { background: #2a2e44; }
+body.in-store::after { display: none; }
+
+/* game page: fills the screen, media on the left */
+#store-item { width: min(1560px, 94vw); max-width: none; height: 92vh; max-height: 92vh; padding: 0; overflow: hidden; }
+#store-item[open] { display: block; }
+#store-item form { height: 100%; display: flex; flex-direction: column; }
+#si-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 22px; padding: 22px 24px; overflow: hidden; }
+#si-body > .store-msg { grid-column: 1 / -1; }
+.si-media { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.si-stage { flex: 1; min-height: 0; background: #000; display: flex; align-items: center; justify-content: center; }
+.si-stage video, .si-stage img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.si-strip { flex: none; display: flex; gap: 8px; overflow-x: auto; padding: 3px; }
+.si-thumb { flex: none; width: 128px; aspect-ratio: 16 / 9; padding: 0; border: 2px solid transparent; background: #000; position: relative; }
+.si-thumb.on { border-color: #fff; }
+.si-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.si-thumb.video::after { content: "▶"; position: absolute; inset: 0; display: grid; place-items: center; font-size: 20px; text-shadow: 0 0 6px #000; }
+.si-info { overflow-y: auto; min-height: 0; }
+.si-info h2 { font-size: 32px; line-height: 1.05; }
+.si-desc { margin: 10px 0 14px; }
+.si-facts > div { display: flex; justify-content: space-between; gap: 14px; padding: 6px 0; border-top: 1px solid #1b1e2d; font-size: 13.5px; }
+.si-facts label { flex-direction: row; margin: 0; color: var(--text-dim); }
+.si-facts span { text-align: right; }
+#store-item .settings-actions { position: static; margin: 0; flex: none; padding: 12px 24px; }
+
+/* Discounts & Events */
+.events { display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; align-items: center; gap: 10px; }
+.events-body { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; background: var(--panel); padding: 14px; height: clamp(320px, 42vh, 460px); }
+.event { position: relative; padding: 0; background: #000; border: 0; overflow: hidden; display: block; min-height: 0; }
+.event img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.event:hover, .event:focus { outline: 2px solid #fff; outline-offset: 1px; }
+.event-col { display: grid; grid-template-rows: 1fr 1fr; gap: 14px; min-height: 0; }
+.event-label { position: absolute; left: 0; top: 0; background: var(--accent); padding: 3px 9px; font-family: var(--font-body); font-size: 12.5px; font-weight: 700; text-transform: uppercase; }
+.event-note { position: absolute; right: 0; bottom: 0; background: rgba(0,0,0,.8); padding: 4px 9px; font-family: var(--font-body); font-size: 12.5px; }
+.event-price { position: absolute; right: 0; bottom: 0; display: flex; align-items: center; gap: 7px; background: rgba(0,0,0,.85); padding-right: 8px; font-family: var(--font-body); font-size: 13.5px; font-weight: 600; }
+.event-price .pct { background: var(--accent); padding: 3px 6px; }
+.event-price s { color: var(--text-dim); font-size: 12px; font-weight: 400; }
+.event-arrow { height: 80px; background: transparent; border: 0; font-size: 34px; color: var(--text-dim); }
+.event-arrow:hover { color: #fff; }
+.event-dots { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+.event-dots button { width: 22px; height: 7px; padding: 0; border: 0; background: #3a3f55; }
+.event-dots button.on { background: #fff; }
+
+/* speed: skip drawing cards that are off screen, and no blur on the large featured image */
+.tile { content-visibility: auto; contain-intrinsic-size: auto 230px; }
+.store-hero .bg, #feature.store-hero .bg { filter: none; inset: 0; opacity: .32; }
+.store-hero .bg, #feature.store-hero .bg { opacity: .2; }
+
+/* outlines are drawn inside controls, so a clipped parent can't cut them off */
+body.pad :focus { outline-offset: -3px; }
+.tile:focus, .offer:focus { outline: none; }
+.tile:focus .tile-art { outline: 3px solid #fff; outline-offset: -3px; }
+.event:focus, .event:hover { outline: none; }
+.event:focus::after, .event:hover::after { content: ""; position: absolute; inset: 0; border: 3px solid #fff; pointer-events: none; }
+
+/* event cards keep the shape of Steam's art, whatever the window size */
+.events-body { --h: clamp(300px, min(46vh, 25vw), 520px); height: auto; display: flex; justify-content: center; gap: 14px; }
+.event.tall { flex: none; height: var(--h); aspect-ratio: 374 / 448; }
+.event-col { flex: none; height: var(--h); aspect-ratio: 1.07; }
+
+/* each page fills the width: two tall cards and a 2x2 block of deals, all at the art's own proportions.
+   The sizes come from the section's width (3.81 = the combined width of the cards for each unit of height). */
+.events-body { container-type: inline-size; display: flex; justify-content: flex-start; gap: 14px; height: auto; }
+.event.tall, .event-col { --h: calc((100cqw - 12px) / 3.81); height: var(--h); }
+.event-col { width: calc(var(--h) * 2.14 - 16px); aspect-ratio: auto; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 14px; }
+/* selected cards: one border over the art, not an outline hidden behind it */
+body.pad .tile:focus, body.pad .offer:focus, body.pad .event:focus { outline: none; }
+.tile:focus .tile-art, .tile:hover .tile-art { outline: none; }
+.tile:focus .tile-art::after, .tile:hover .tile-art::after { content: ""; display: block; position: absolute; inset: 0; background: none; border: 3px solid #fff; z-index: 2; }
+
+/* a quiet placeholder while art arrives, so a slow image doesn't look like a hole */
+.tile-art, .offer-art, .event { background: #151829; }

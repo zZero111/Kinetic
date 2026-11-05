@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('api', {
   storeDetails: inv('store:details'),
   steamAction: inv('store:steam'),
   steamJob: inv('steam:job'),
+  onWindowActive: (cb) => ipcRenderer.on('window:active', (_e, on) => cb(on)),
   storeBuy: inv('store:buy'),
   buyClose: inv('buy:close'),
   buyInput: inv('buy:input'),

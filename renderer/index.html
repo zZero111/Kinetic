@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Kinetic</title>
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; media-src 'self' blob: https://*.steamstatic.com; connect-src 'self' https://*.steamstatic.com; worker-src 'self' blob:">
   <link rel="stylesheet" href="theme.css">
   <link rel="stylesheet" href="app.css">
   <link rel="stylesheet" href="motion.css">
@@ -19,6 +19,7 @@
       <button class="tab" data-tab="recent"><span>Recent <b id="c-recent">0</b></span></button>
       <button class="tab" data-tab="store"><span>Store</span></button>
     </div>
+    <div class="tabs" id="store-tabs" hidden></div>
     <div class="tools">
       <button class="icon-btn update-btn" id="update-btn" hidden>Update</button>
       <input id="search" type="search" placeholder="SEARCH" aria-label="Search">
@@ -130,6 +131,16 @@
       <button value="cancel">Cancel</button>
       <button id="e-saveb" value="save" class="primary">Save</button>
     </div>
+  </form>
+</dialog>
+
+<!-- Cart -->
+<dialog id="cart">
+  <form method="dialog">
+    <h2>Cart</h2>
+    <div id="cart-list"></div>
+    <p class="hint-text" style="margin-top:10px">Steam takes payment for one game at a time, so checkout goes through your cart in order.</p>
+    <div class="row settings-actions"><span class="spacer"></span><button value="cancel">Close</button><button type="button" id="cart-go" class="primary">Checkout</button></div>
   </form>
 </dialog>
 
