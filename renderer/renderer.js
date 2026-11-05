@@ -395,13 +395,20 @@ $('e-desktop').onclick = async () => { const r = await window.api.shortcut(editi
 $('e-startmenu').onclick = async () => { const r = await window.api.shortcut(editing.id, 'startmenu'); toast(r.ok ? 'Start Menu shortcut created' : r.error, !r.ok); };
 $('e-steam').onclick = async () => { const r = await window.api.addToSteam(editing.id); toast(r.ok ? 'Added to Steam — restart Steam to see it' : r.error, !r.ok); };
 
-$('e-remove').onclick = async () => {
-  if (confirm(`Remove “${editing.title}” from the library? The game files are not deleted.`)) {
-    await window.api.removeGame(editing.id);
-    dlg.close('cancel');
-    refresh();
-  }
-};
+// a second press confirms, so these work from a controller
+function pressTwice(btn, fn) {
+  if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = btn.dataset.label; fn(); return; }
+  btn.dataset.label = btn.textContent;
+  btn.dataset.armed = '1';
+  btn.textContent = 'Press again to confirm';
+  setTimeout(() => { if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = btn.dataset.label; } }, 3000);
+}
+
+$('e-remove').onclick = () => pressTwice($('e-remove'), async () => {
+  await window.api.removeGame(editing.id);
+  dlg.close('cancel');
+  refresh();
+});
 
 dlg.addEventListener('close', async () => {
   if (dlg.returnValue !== 'save' || !editing) return;
@@ -577,7 +584,7 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'e' && g) openEdit(g);
   else if (k === 'f' && g) toggleFav(g);
 });
-document.addEventListener('mousemove', () => setInput('kbd'));
+document.addEventListener('mousemove', () => { setInput('kbd'); document.body.classList.remove('pad'); });
 document.addEventListener('wheel', () => setInput('kbd'), { passive: true });
 
 // ---- on-screen button prompts follow whichever input was used last
@@ -622,36 +629,229 @@ stage.addEventListener('wheel', (e) => {
   wheelLock = now + 240;
 }, { passive: false });
 
-// ---------------------------------------------------------------- gamepad (A play, X details, Y favourite, LB/RB browse)
-const held = {};
-let padLoop = false;
+// ---------------------------------------------------------------- controller
+// Library: A play, X details, Y favourite, LB/RB browse, D-pad up for the top bar.
+// Everywhere: LT/RT change tab, View opens Downloads, B goes back, right stick scrolls.
+// Polled on a timer rather than animation frames, which stop while the checkout page is on top.
 const PS_PAD = /054c|dualshock|dualsense|playstation|wireless controller/i;
-// The loop only runs while a controller is connected, and only looks up the current game on a button press.
-function pollPad() {
-  const pad_ = [...(navigator.getGamepads() || [])].find(Boolean);
-  if (!pad_) { padLoop = false; return; }
-  const down = (n) => !!pad_.buttons[n] && pad_.buttons[n].pressed;
-  const ax = pad_.axes[0] || 0;
-  const states = {
-    a: down(0), x: down(2), y: down(3), lb: down(4) || down(14) || ax < -0.6,
-    rb: down(5) || down(15) || ax > 0.6, start: down(9),
-  };
-  if (pad_.buttons.some((b) => b.pressed) || Math.abs(ax) > 0.6) setInput(PS_PAD.test(pad_.id) ? 'ps' : 'xbox');
-  const edge = (k, fn) => { if (states[k] && !held[k]) fn(); held[k] = states[k]; };
-  const cur = () => visible()[index];
-  if (!modalOpen()) {
-    edge('a', () => { const g = cur(); if (g && !g.running) play_(g); });
-    edge('x', () => { const g = cur(); if (g) openEdit(g); });
-    edge('y', () => { const g = cur(); if (g) toggleFav(g); });
-    edge('lb', () => select(index - 1));
-    edge('rb', () => select(index + 1));
-    edge('start', () => window.api.toggleFullscreen());
-  }
-  requestAnimationFrame(pollPad);
+const held = {}, repeatAt = {};
+let padTimer = 0, zone = null; // zone: 'header' or 'jobs' while the controller is in one of those areas
+let buying = false, padLatch = false;
+
+const openDialog = () => [dlg, settingsDlg, importDlg, $('store-item')].find((d) => d.open);
+function navRoot() {
+  return openDialog() || (zone === 'jobs' ? $('jobs') : zone === 'header' ? document.querySelector('header') : tab === 'store' ? $('app') : null);
 }
-function startPadLoop() { if (!padLoop) { padLoop = true; requestAnimationFrame(pollPad); } }
+const canFocus = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && e.offsetParent !== null; };
+const focusables = (root) => [...root.querySelectorAll('button:not([disabled]),select,input,summary,a[href]')].filter(canFocus);
+
+function focusEl(e) {
+  e.focus({ preventScroll: true });
+  e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+// moves to the nearest control in that direction, wherever the layout has put it
+function moveFocus(dir) {
+  const root = navRoot();
+  const list = focusables(root);
+  if (!list.length) return;
+  const cur = document.activeElement;
+  if (!root.contains(cur) || !list.includes(cur)) { focusEl(list[0]); return; }
+  const c = cur.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
+  let best = null, score = Infinity;
+  for (const e of list) {
+    if (e === cur) continue;
+    const r = e.getBoundingClientRect();
+    const dx = r.left + r.width / 2 - cx, dy = r.top + r.height / 2 - cy;
+    const along = { up: -dy, down: dy, left: -dx, right: dx }[dir];
+    if (along <= 4) continue;
+    const sum = along + Math.abs(dir === 'up' || dir === 'down' ? dx : dy) * 3;
+    if (sum < score) { score = sum; best = e; }
+  }
+  if (best) focusEl(best);
+  else if (dir === 'up' && zone === 'header') zone = null;
+  else if (dir === 'down' && zone === 'header') { zone = null; cur.blur(); }
+}
+
+function stepSelect(sel, by) {
+  const n = sel.options.length;
+  if (!n) return;
+  sel.selectedIndex = (sel.selectedIndex + by + n) % n;
+  sel.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+const isTyping = (e) => e.matches('input:not([type=checkbox]):not([type=radio]), textarea');
+function activate() {
+  const e = document.activeElement;
+  if (!e || e === document.body) return;
+  if (e.matches('select')) stepSelect(e, 1);
+  else if (isTyping(e)) openKeyboard({ input: e });
+  else e.click();
+}
+
+function goBack() {
+  const d = openDialog();
+  if (d) d.close('cancel');
+  else if (zone) { zone = null; document.activeElement.blur(); }
+  else if (tab === 'store') document.querySelector('[data-tab=all]').click();
+}
+
+function changeTab(by) {
+  const tabs = [...document.querySelectorAll('.tab')];
+  const i = tabs.findIndex((t) => t.dataset.tab === tab);
+  tabs[(i + by + tabs.length) % tabs.length].click();
+}
+
+function scrollArea(amount) {
+  const box = openDialog() || (tab === 'store' ? storeEl : null);
+  if (box) box.scrollTop += amount;
+}
+
+// ---- on-screen keyboard: types into a Kinetic field, or into the checkout page
+const OSK_ROWS = ['1234567890', 'qwertyuiop', 'asdfghjkl@', 'zxcvbnm.-_', '!#$%&*+=?/'];
+let osk = null; // { input } or { buy: true }; row and col are the selected key
+let oskRow = 1, oskCol = 0, oskCaps = false;
+const oskKeys = () => [...OSK_ROWS.map((r) => [...(oskCaps ? r.toUpperCase() : r)]), ['Caps', 'Space', 'Delete', 'Done']];
+
+function drawKeyboard() {
+  const box = $('osk');
+  const keys = oskKeys();
+  oskRow = Math.max(0, Math.min(oskRow, keys.length - 1));
+  oskCol = Math.max(0, Math.min(oskCol, keys[oskRow].length - 1));
+  box.replaceChildren(el('div', 'osk-show', osk.buy ? 'Typing into the page' : osk.input.value || ' '),
+    ...keys.map((row, r) => { const line = el('div', 'osk-row'); line.append(...row.map((k, c) => el('span', 'osk-key' + (r === oskRow && c === oskCol ? ' on' : ''), k))); return line; }),
+    el('div', 'osk-help', 'A type · X delete · Y space · B done'));
+}
+function openKeyboard(target) {
+  osk = target;
+  $('osk').hidden = false;
+  drawKeyboard();
+  if (osk.buy) window.api.buyReserve($('osk').offsetHeight);
+}
+function closeKeyboard() {
+  if (osk && osk.buy) window.api.buyReserve(0);
+  osk = null;
+  $('osk').hidden = true;
+}
+function typeKey(ch) {
+  if (osk.buy) window.api.buyInput('char', ch);
+  else { osk.input.value += ch; osk.input.dispatchEvent(new Event('input', { bubbles: true })); }
+  drawKeyboard();
+}
+function deleteKey() {
+  if (osk.buy) window.api.buyInput('backspace');
+  else { osk.input.value = osk.input.value.slice(0, -1); osk.input.dispatchEvent(new Event('input', { bubbles: true })); }
+  drawKeyboard();
+}
+function pressKey() {
+  const k = oskKeys()[oskRow][oskCol];
+  if (k === 'Done') closeKeyboard();
+  else if (k === 'Delete') deleteKey();
+  else if (k === 'Space') typeKey(' ');
+  else if (k === 'Caps') { oskCaps = !oskCaps; drawKeyboard(); }
+  else typeKey(k);
+}
+function moveKey(dir) {
+  const keys = oskKeys();
+  if (dir === 'up' || dir === 'down') {
+    const was = oskCol / keys[oskRow].length;
+    oskRow = (oskRow + (dir === 'up' ? -1 : 1) + keys.length) % keys.length;
+    oskCol = Math.floor(was * keys[oskRow].length);
+  } else oskCol = (oskCol + (dir === 'left' ? -1 : 1) + keys[oskRow].length) % keys[oskRow].length;
+  drawKeyboard();
+}
+
+function padHints() {
+  const box = $('pad-hints');
+  const root = !buying && !osk && inputMode !== 'kbd' && navRoot();
+  box.hidden = !root;
+  if (root) box.textContent = openDialog() ? 'A select · B back · Right stick scroll' : 'A select · B back · LT / RT tabs · View downloads · Right stick scroll';
+}
+
+function readPad(p) {
+  const down = (n) => !!p.buttons[n] && p.buttons[n].pressed;
+  const ax = p.axes[0] || 0, ay = p.axes[1] || 0;
+  return {
+    a: down(0), b: down(1), x: down(2), y: down(3), lb: down(4), rb: down(5), lt: down(6), rt: down(7), view: down(8), start: down(9),
+    up: down(12) || ay < -0.6, down: down(13) || ay > 0.6, left: down(14) || ax < -0.6, right: down(15) || ax > 0.6,
+    scroll: Math.abs(p.axes[3] || 0) > 0.25 ? p.axes[3] : 0,
+  };
+}
+
+function pollPad() {
+  const p = [...(navigator.getGamepads() || [])].find(Boolean);
+  if (!p) { clearInterval(padTimer); padTimer = 0; return; }
+  const st = readPad(p);
+  if (p.buttons.some((b) => b.pressed) || Math.abs(p.axes[0] || 0) > 0.6 || Math.abs(p.axes[1] || 0) > 0.6) {
+    setInput(PS_PAD.test(p.id) ? 'ps' : 'xbox');
+    document.body.classList.add('pad');
+  }
+  const now = Date.now();
+  const once = (k, fn) => { if (st[k] && !held[k]) fn(); held[k] = st[k]; };
+  // directions repeat while held, after a short pause
+  const dirs = (fn) => { for (const d of ['up', 'down', 'left', 'right']) {
+    if (st[d] && (!held[d] || now >= repeatAt[d])) { repeatAt[d] = now + (held[d] ? 130 : 380); fn(d); }
+    held[d] = st[d];
+  } };
+
+  if (osk) {
+    dirs(moveKey);
+    once('a', pressKey); once('x', deleteKey); once('y', () => typeKey(' ')); once('b', closeKeyboard);
+  } else if (buying) {
+    // a direction still held from before the page opened doesn't count until it is released
+    if (padLatch && !(st.up || st.down || st.left || st.right)) padLatch = false;
+    if (!padLatch) dirs((d) => window.api.buyInput(d));
+    once('a', () => window.api.buyInput('enter'));
+    once('x', () => window.api.buyInput('space'));
+    once('y', () => openKeyboard({ buy: true }));
+    once('b', () => window.api.buyClose());
+    if (st.scroll) window.api.buyInput('scroll', st.scroll * 60);
+  } else if (navRoot()) {
+    dirs((d) => {
+      const e = document.activeElement;
+      if ((d === 'left' || d === 'right') && e && e.matches('select')) stepSelect(e, d === 'left' ? -1 : 1);
+      else moveFocus(d);
+    });
+    once('a', activate);
+    once('b', goBack);
+    once('lt', () => { if (!openDialog()) changeTab(-1); });
+    once('rt', () => { if (!openDialog()) changeTab(1); });
+    once('view', () => { zone = zone === 'jobs' ? null : !$('jobs').hidden ? 'jobs' : zone; });
+    if (st.scroll) scrollArea(st.scroll * 22);
+  } else {
+    const cur = () => visible()[index];
+    once('a', () => { const g = cur(); if (g && !g.running) play_(g); });
+    once('x', () => { const g = cur(); if (g) openEdit(g); });
+    once('y', () => { const g = cur(); if (g) toggleFav(g); });
+    once('lb', () => select(index - 1));
+    once('rb', () => select(index + 1));
+    once('start', () => window.api.toggleFullscreen());
+    once('lt', () => changeTab(-1));
+    once('rt', () => changeTab(1));
+    once('view', () => { if (!$('jobs').hidden) zone = 'jobs'; });
+    dirs((d) => {
+      if (d === 'left') select(index - 1);
+      else if (d === 'right') select(index + 1);
+      else if (d === 'up') { zone = 'header'; moveFocus('down'); }
+    });
+  }
+  for (const k of ['a', 'b', 'x', 'y', 'lb', 'rb', 'lt', 'rt', 'view', 'start']) held[k] = st[k];
+  padHints();
+}
+function startPadLoop() { if (!padTimer) padTimer = setInterval(pollPad, 16); }
 window.addEventListener('gamepadconnected', startPadLoop);
 if ([...(navigator.getGamepads() || [])].some(Boolean)) startPadLoop();
+
+window.api.onBuyState((st) => {
+  if (st.open && !buying) padLatch = true;
+  buying = st.open;
+  $('buy-bar').hidden = !st.open;
+  if (st.host) $('buy-host').textContent = st.host;
+  $('buy-hints').textContent = inputMode === 'kbd' ? '' : 'D-pad move · A press · X tick · Y keyboard · Right stick scroll · B back';
+  if (!st.open && osk) closeKeyboard();
+  if (!st.open && buyReturn) { const id = buyReturn; buyReturn = null; openStoreItem(id); } // shows Download if it was bought
+});
+$('buy-close').onclick = () => window.api.buyClose();
 
 // ---- import dropdown
 {
@@ -889,7 +1089,13 @@ async function openStoreItem(id) {
   itemDlg.showModal();
   const r = await window.api.storeDetails(id);
   if (itemId !== id) return;
-  if (!r.ok) { body.replaceChildren(el('p', 'store-msg', r.error)); return; }
+  if (!r.ok) {
+    const retry = el('button', '', 'Try again');
+    retry.type = 'button';
+    retry.onclick = () => { itemDlg.close('cancel'); openStoreItem(id); };
+    body.replaceChildren(el('p', 'store-msg', r.error), retry);
+    return;
+  }
   const d = r.data;
   const hero = el('img', 'si-hero');
   hero.src = d.image;
@@ -904,15 +1110,51 @@ async function openStoreItem(id) {
   body.replaceChildren(hero, el('h2', '', d.name), meta, el('p', 'si-desc', plainText(d.description)),
     el('p', 'hint-text', [d.developers.join(', '), d.released].filter(Boolean).join(' · ')), shots);
   const owned = installedIds.has(String(id));
-  $('si-install').hidden = owned || d.comingSoon;
-  $('si-open').hidden = d.free || owned;
+  // a paid game that isn't on the account can only be bought, so Install is not offered for it
+  const onAccount = await window.api.steamOwned(id);
+  if (itemId !== id) return;
+  const noInstall = owned || d.comingSoon || (!d.free && onAccount === false);
+  $('si-install').hidden = noInstall;
+  itemStorage = d.storage;
+  await drawDrives(noInstall);
+  if (itemId !== id) return;
+  $('si-open').hidden = d.free || owned || onAccount === true;
   itemName = d.name;
 }
-$('si-open').onclick = () => steamAction('page', itemId);
-$('si-install').onclick = () => {
-  if (!confirm(`Install ${itemName}?\n\nSteam restarts in the background to start the download. This only works for games you own or free games.`)) return;
+// Steam can't start a download unless the whole game fits, so the drive is chosen before installing
+let itemStorage = 0;
+async function drawDrives(hide) {
+  const sel = $('si-lib');
+  sel.hidden = hide;
+  $('si-space').textContent = '';
+  if (hide) return;
+  const libs = (await window.api.steamLibraries()).sort((a, b) => b.free - a.free);
+  sel.replaceChildren(...libs.map((l) => new Option(`${l.path.slice(0, 2).toUpperCase()} (${fmtBytes(l.free)} free)`, l.path)));
+  checkDrive();
+}
+function checkDrive() {
+  const opt = $('si-lib').selectedOptions[0];
+  const free = opt ? Number(/([\d.]+) (GB|MB)/.exec(opt.text)?.[1]) * (opt.text.includes(' GB ') ? 1e9 : 1e6) : 0;
+  const short = itemStorage && free < itemStorage;
+  $('si-space').textContent = itemStorage ? `Needs about ${fmtBytes(itemStorage)}` : '';
+  $('si-space').className = short ? 'bad' : '';
+}
+$('si-lib').onchange = checkDrive;
+// the popup has to close first: while it is open, everything outside it is disabled, including the checkout's Back button
+let buyReturn = null;
+$('si-open').onclick = async () => {
+  buyReturn = itemId;
   itemDlg.close('cancel');
-  steamJob('install', [{ id: itemId, name: itemName }]);
+  const r = await window.api.storeBuy(itemId, itemName);
+  if (!r.ok) { toast(r.error, true); openStoreItem(buyReturn); buyReturn = null; }
+};
+window.api.onBought((id, name) => {
+  $('buy-hints').textContent = `${name} is on your account. Go back to download it.`;
+});
+$('si-install').onclick = () => {
+  const lib = $('si-lib').value;
+  itemDlg.close('cancel');
+  steamJob('install', [{ id: itemId, name: itemName, lib }]);
 };
 
 async function steamJob(kind, items) {
@@ -926,12 +1168,13 @@ function fmtLeft(sec) {
   const m = Math.round(sec / 60);
   return m < 60 ? `${m} min left` : `${Math.floor(m / 60)} h ${m % 60} min left`;
 }
-const JOB_STATE = { queued: 'Queued', downloading: 'Downloading', installing: 'Installing', paused: 'Paused' };
+const JOB_STATE = { queued: 'Queued', downloading: 'Downloading', installing: 'Installing', paused: 'Paused', failed: 'Stopped' };
 
 const fmtRate = (b) => `${(b * 8 / 1e6).toFixed(1)} Mbps`;
 const fmtClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 function jobDetail(j) {
+  if (j.error) return j.error;
   if (j.live) {
     const l = j.live, parts = [];
     if (l.network) parts.push(`Network ${fmtRate(l.network)}`);
@@ -950,7 +1193,13 @@ function jobDetail(j) {
 }
 
 async function jobControl(action, j, btn) {
-  if (action === 'cancel' && !confirm(j.kind === 'install' ? `Cancel installing ${j.name}? The partial download is deleted.` : `Cancel updating ${j.name}? Steam will try again in about a week, or when you press Update.`)) return;
+  // a second press confirms, so there is no popup to dismiss
+  if (action === 'cancel' && !btn.dataset.armed) {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Press again';
+    setTimeout(() => { delete btn.dataset.armed; btn.textContent = 'Cancel'; }, 3000);
+    return;
+  }
   btn.disabled = true;
   const r = await window.api.steamControl(action, j.id);
   if (!r.ok) { btn.disabled = false; toast(r.error, true); }
@@ -969,7 +1218,10 @@ function jobRow(j) {
   btns.append(toggle, cancel);
   row.append(name, state, bar, stages, detail, btns);
   const r = { row, state, detail, fill, bar, stages, toggle, cancel, job: j };
-  toggle.onclick = () => jobControl(r.job.state === 'paused' ? 'resume' : 'pause', r.job, toggle);
+  toggle.onclick = () => {
+    if (r.job.needsLicense) { steamAction('install', r.job.id); return; }
+    jobControl(r.job.state === 'paused' || r.job.state === 'failed' ? 'resume' : 'pause', r.job, toggle);
+  };
   cancel.onclick = () => jobControl('cancel', r.job, cancel);
   return r;
 }
@@ -1010,7 +1262,8 @@ function drawJobs(list) {
     r.detail.textContent = jobDetail(j);
     r.fill.style.width = j.percent + '%';
     drawStages(r, j);
-    r.toggle.textContent = j.state === 'paused' ? 'Resume' : 'Pause';
+    r.toggle.textContent = j.needsLicense ? 'Get in Steam' : j.state === 'failed' ? 'Retry' : j.state === 'paused' ? 'Resume' : 'Pause';
+    r.detail.classList.toggle('bad', !!j.error);
     if (was !== j.state) { r.toggle.disabled = false; r.cancel.disabled = false; }
   }
   for (const [id, r] of jobRows) if (!seen.has(id)) { r.row.remove(); jobRows.delete(id); }
@@ -1034,7 +1287,6 @@ function showUpdate(info) {
 }
 async function installUpdate() {
   if (!pendingUpdate) return;
-  if (!confirm(`Install Kinetic ${pendingUpdate.version}?\n\n${(pendingUpdate.notes || '').slice(0, 400)}\n\nThe launcher will restart. Your library and settings are kept.`)) return;
   const btn = $('update-btn');
   btn.disabled = true;
   btn.textContent = 'Downloading…';
@@ -1044,7 +1296,7 @@ async function installUpdate() {
 }
 window.api.onUpdateAvailable(showUpdate);
 window.api.onUpdateProgress((p) => { $('update-btn').textContent = `Downloading ${Math.round(p * 100)}%`; });
-$('update-btn').onclick = installUpdate;
+$('update-btn').onclick = () => pressTwice($('update-btn'), installUpdate);
 $('s-update-install').onclick = () => { settingsDlg.close('cancel'); installUpdate(); };
 $('s-update-check').onclick = async () => {
   const msg = $('s-update-msg');

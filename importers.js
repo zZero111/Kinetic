@@ -132,7 +132,10 @@ async function steamState() {
         const acf = await fs.promises.readFile(path.join(apps, f), 'utf8');
         const get = (k) => new RegExp(`"${k}"\\s+"([^"]*)"`).exec(acf)?.[1];
         const id = get('appid');
-        if (id && id !== '228980') found.set(id, { id, name: get('name') || id, update: !!(Number(get('StateFlags')) & 2) && Number(get('TargetBuildID') || 0) > 0 });
+        const flags = Number(get('StateFlags'));
+        const installed = (flags & 4) !== 0;
+        // never fully installed but marked for download: an install that was started and has not finished
+        if (id && id !== '228980') found.set(id, { id, name: get('name') || id, update: installed && !!(flags & 2) && Number(get('TargetBuildID') || 0) > 0, unfinished: !installed && !!(flags & 2) });
       } catch {}
     }));
   }

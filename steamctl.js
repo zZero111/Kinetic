@@ -35,10 +35,11 @@ function manifestPath(steamRoot, id) {
   return null;
 }
 
-// new games go to the library with the most free space
+const freeSpace = (dir) => { try { const s = fs.statfsSync(dir); return s.bavail * s.bsize; } catch { return 0; } };
+
+// the default place for a new game: the library with the most free space
 function roomiestLibrary(steamRoot) {
-  const free = (l) => { try { const s = fs.statfsSync(l); return s.bavail * s.bsize; } catch { return 0; } };
-  return libraries(steamRoot).sort((a, b) => free(b) - free(a))[0];
+  return libraries(steamRoot).sort((a, b) => freeSpace(b) - freeSpace(a))[0];
 }
 
 const safeFolder = (name) => name.replace(/[<>:"/\\|?*\x00-\x1f]+/g, '').replace(/\s+/g, ' ').replace(/[. ]+$/, '').trim() || 'Game';
@@ -67,14 +68,17 @@ function cancelUpdate(file) {
   fs.writeFileSync(file, text.replace(/("ScheduledAutoUpdate"\s+")\d+"/, `$1${later}"`));
 }
 
-// only for a game that never finished installing; removes its manifest and partial download
+// only for a game that never finished installing. The manifest goes now, while Steam is closed; the partial
+// download can be many GB, so its folders are returned for removeLeftovers to delete in the background.
 function cancelInstall(file, id) {
   const flags = Number(/"StateFlags"\s+"(\d+)"/.exec(fs.readFileSync(file, 'utf8'))?.[1] || 0);
   if (flags & INSTALLED) throw new Error('This game is already installed, so it was left alone');
   const apps = path.dirname(file);
   fs.rmSync(file, { force: true });
-  for (const d of ['downloading', 'temp']) fs.rmSync(path.join(apps, d, String(id)), { recursive: true, force: true });
+  return ['downloading', 'temp'].map((d) => path.join(apps, d, String(id)));
 }
+
+const removeLeftovers = (dirs) => Promise.all(dirs.map((d) => fs.promises.rm(d, { recursive: true, force: true }).catch(() => {})));
 
 function writeInstallManifest(lib, id, name) {
   const q = (s) => String(s).replace(/["\\]/g, '');
@@ -114,7 +118,7 @@ function progress(file) {
     const installing = !!total && got >= total && stage > 0;
     const part = installing ? staged / stage : total ? got / total : 0;
     return {
-      stage, done: (flags & INSTALLED) !== 0 && (flags & 2) === 0 && (flags & STARTED) === 0, got, total,
+      stage, owned: num('LastOwner') !== 0, result: num('UpdateResult'), done: (flags & INSTALLED) !== 0 && (flags & 2) === 0 && (flags & STARTED) === 0, got, total,
       estimated, paused: (flags & PAUSED) !== 0, active: (flags & (RUNNING | STARTED)) !== 0, installing,
       percent: Math.min(100, Math.floor(part * 100)),
     };
@@ -140,4 +144,4 @@ function start(steamRoot) {
   spawn(path.join(steamRoot, 'steam.exe'), ['-silent', '-cef-enable-debugging'], { detached: true, stdio: 'ignore' }).unref();
 }
 
-module.exports = { root, libraries, manifestPath, roomiestLibrary, markForUpdate, pause, cancelUpdate, cancelInstall, writeInstallManifest, progress, gameRunning, shutdown, start, safeFolder };
+module.exports = { root, libraries, freeSpace, manifestPath, roomiestLibrary, markForUpdate, pause, cancelUpdate, cancelInstall, removeLeftovers, writeInstallManifest, progress, gameRunning, shutdown, start, safeFolder };

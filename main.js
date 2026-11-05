@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, net, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, net, screen, WebContentsView } = require('electron');
 const importers = require('./importers');
 const updater = require('./updater');
 const store = require('./store');
@@ -169,6 +169,7 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('before-input-event', (_e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') win.setFullScreen(!win.isFullScreen());
+    if (input.type === 'keyDown' && input.key === 'Escape' && buyView) { _e.preventDefault(); closeBuyView(); }
   });
   win.on('focus', () => { if (startupDone) { syncAzimuth(); refreshSteamState(); } });
   win.on('close', (e) => {
@@ -1054,13 +1055,14 @@ async function refreshSteamState() {
     const changed = JSON.stringify(next) !== JSON.stringify(steamGames);
     steamGames = next;
     if (changed) send('library:changed');
+    await adoptUnfinishedInstalls();
   } catch {}
 }
 
 ipcMain.handle('store:home', () => storeCall(async () => {
   steamChecked = 0;
   await refreshSteamState();
-  return { ...(await store.home(region(), storeFetch)), updates: steamGames.filter((g) => g.update), installed: steamGames.map((g) => g.id) };
+  return { ...(await store.home(region(), storeFetch)), updates: steamGames.filter((g) => g.update), installed: steamGames.filter((g) => !g.unfinished).map((g) => g.id) };
 }));
 ipcMain.handle('store:search', (_e, term) => storeCall(() => store.search(String(term), region(), storeFetch)));
 ipcMain.handle('store:details', (_e, id) => storeCall(() => store.details(Number(id), region(), storeFetch)));
@@ -1080,7 +1082,7 @@ let steamPoll = null;
 let lastRestart = 0;
 const STALL_MS = 3 * 60 * 1000;
 
-const jobList = () => [...steamJobs.values()].map(({ id, name, kind, state, percent, got, total, speed, estimated, live }) => ({ id, name, kind, state, percent: percent || 0, got: got || 0, total: total || 0, speed: speed || 0, estimated: !!estimated, live: live || null }));
+const jobList = () => [...steamJobs.values()].map(({ id, name, kind, state, percent, got, total, speed, estimated, live, error, needsLicense }) => ({ needsLicense: !!needsLicense, id, name, kind, state, percent: percent || 0, got: got || 0, total: total || 0, speed: speed || 0, estimated: !!estimated, live: live || null, error: error || '' }));
 
 // Every change to Steam's files happens here: Steam closed first, and always started again afterwards
 async function withSteamClosed(fn) {
@@ -1111,7 +1113,15 @@ async function addInstalledGame(id) {
   autoArt([g.id]);
 }
 
+// a check can take seconds while Steam restarts, so a new one never starts on top of it
+let polling = false;
 async function pollSteamJobs() {
+  if (polling) return;
+  polling = true;
+  try { await checkSteamJobs(); } finally { polling = false; }
+}
+
+async function checkSteamJobs() {
   const now = Date.now();
   const snap = (await steamlive.connect()) ? await steamlive.snapshot().catch(() => null) : null;
   for (const job of [...steamJobs.values()]) {
@@ -1125,6 +1135,31 @@ async function pollSteamJobs() {
       continue;
     }
     if (!p) continue;
+    // Steam stopped this one itself and recorded why, so resuming it automatically would only fail again
+    if (p.paused && p.result && !job.userPaused) {
+      const gb = (n) => `${(n / 1e9).toFixed(1)} GB`;
+      const drive = path.parse(job.file).root.replace(/[\\/]+$/, '');
+      if (job.state !== 'failed') send('steam:finished', false, `${job.name} stopped: ${p.result === 12 ? 'not enough disk space' : 'Steam reported a problem'}`);
+      job.state = 'failed';
+      job.percent = p.percent;
+      job.total = p.total;
+      job.live = null;
+      job.error = p.result === 12
+        ? `Needs ${gb(Math.max(p.total, p.stage))}, but ${drive} has ${gb(steamctl.freeSpace(path.dirname(job.file)))} free. Cancel it and pick another drive, or free up space and press Retry.`
+        : `Steam stopped this download (error ${p.result}). Press Retry to try again.`;
+      continue;
+    }
+    // Steam fills in LastOwner when the account has the game. Without it Steam quietly ignores the install;
+    // this happens with free games that were never added to the account, as well as paid ones.
+    job.needsLicense = job.kind === 'install' && !p.owned && now - job.started > 45000;
+    if (job.needsLicense) {
+      if (job.state !== 'failed') send('steam:finished', false, `${job.name} is not on your Steam account yet`);
+      job.state = 'failed';
+      job.live = null;
+      job.error = 'Steam has not added this game to your account, so it will not download. Press Get in Steam to add it, or Cancel.';
+      continue;
+    }
+    job.error = '';
     const live = snap ? steamlive.readOverview(snap.overview, job.id, p.total, p.stage) : null;
     job.live = live;
     if (live) {
@@ -1171,6 +1206,17 @@ async function pollSteamJobs() {
   if (!steamJobs.size) { clearInterval(steamPoll); steamPoll = null; }
 }
 
+// While Steam's install prompt runs, Kinetic stays in front and Steam's windows are hidden as they appear
+function shieldFromSteam() {
+  const w = win;
+  if (w && !w.isDestroyed()) w.setAlwaysOnTop(true, 'screen-saver');
+  const timer = setInterval(() => steamlive.hideWindows().catch(() => {}), 300);
+  return () => {
+    clearInterval(timer);
+    if (w && !w.isDestroyed()) { w.setAlwaysOnTop(false); w.focus(); }
+  };
+}
+
 async function startSteamJobs(kind, items) {
   const todo = items.filter((x) => Number.isInteger(Number(x.id)) && !steamJobs.has(String(x.id)));
   if (!todo.length) return { ok: false, error: 'Already in progress' };
@@ -1192,15 +1238,36 @@ async function startSteamJobs(kind, items) {
       return { ok: true, live: true };
     }
   }
+  // an install is answered through Steam's own prompt: no window to click, no restart
+  if (kind === 'install' && todo.length === 1 && await steamlive.connect()) {
+    const x = todo[0], id = String(Number(x.id));
+    const root = await steamctl.root();
+    const lib = root && (steamctl.libraries(root).includes(x.lib) ? x.lib : steamctl.roomiestLibrary(root));
+    const stopShield = shieldFromSteam();
+    const got = root ? await steamlive.install(id, lib, steamctl.freeSpace(lib)).catch((err) => ({ ok: false, error: err.message })) : { ok: false };
+    setTimeout(stopShield, 2500); // Steam can raise a window just after the install starts
+    if (got.space) return { ok: false, error: `${x.name} needs ${(got.space / 1e9).toFixed(1)} GB, which won't fit on ${path.parse(lib).root.replace(/[\\/]+$/, '')}. Nothing was started.` };
+    if (got.ok) {
+      let file = null;
+      for (let i = 0; i < 20 && !file; i++) { await sleep(500); file = steamctl.manifestPath(root, id); }
+      if (file) {
+        steamJobs.set(id, { id, name: x.name, kind, file, state: 'queued', got: 0, changed: Date.now(), started: Date.now() });
+        send('steam:jobs', jobList());
+        if (!steamPoll) steamPoll = setInterval(() => pollSteamJobs().catch(() => {}), 1000);
+        return { ok: true, live: true };
+      }
+    }
+  }
   const r = await withSteamClosed((root) => {
     for (const x of todo) {
       const id = String(Number(x.id));
       let file = steamctl.manifestPath(root, id);
       if (kind === 'install' && file) continue; // already there
       if (kind === 'update' && !file) continue;
-      if (kind === 'install') file = steamctl.writeInstallManifest(steamctl.roomiestLibrary(root), id, x.name);
+      const libs = steamctl.libraries(root);
+      if (kind === 'install') file = steamctl.writeInstallManifest(libs.includes(x.lib) ? x.lib : steamctl.roomiestLibrary(root), id, x.name);
       else steamctl.markForUpdate(file, path.join(userData(), 'steam-backups'));
-      steamJobs.set(id, { id, name: x.name, kind, file, state: 'queued', got: 0, changed: Date.now() });
+      steamJobs.set(id, { id, name: x.name, kind, file, state: 'queued', got: 0, changed: Date.now(), started: Date.now() });
     }
   });
   if (!r.ok) return r;
@@ -1224,20 +1291,235 @@ async function controlSteamJob(action, id) {
       return { ok: true, live: true };
     }
   }
+  let leftovers = [];
   const r = await withSteamClosed(() => {
     if (action === 'pause') { steamctl.pause(job.file); job.userPaused = true; job.state = 'paused'; job.speed = 0; }
     else if (action === 'resume') { steamctl.markForUpdate(job.file, backups); job.userPaused = false; job.resumes = 0; job.state = 'queued'; job.changed = Date.now(); }
     else if (action === 'cancel') {
-      if (job.kind === 'install') steamctl.cancelInstall(job.file, job.id); else steamctl.cancelUpdate(job.file);
+      if (job.kind === 'install') leftovers = steamctl.cancelInstall(job.file, job.id); else steamctl.cancelUpdate(job.file);
       steamJobs.delete(job.id);
     }
   });
+  steamctl.removeLeftovers(leftovers);
   send('steam:jobs', jobList());
   steamChecked = 0;
   return r;
+}
+
+// null means Kinetic can't tell, for example while Steam is not connected
+ipcMain.handle('steam:owned', async (_e, id) => ((await steamlive.connect()) ? steamlive.owned(id).catch(() => null) : null));
+
+ipcMain.handle('steam:libraries', async () => {
+  const root = await steamctl.root();
+  return root ? steamctl.libraries(root).map((p) => ({ path: p, free: steamctl.freeSpace(p) })) : [];
+});
+
+// an install left unfinished, for example before Kinetic was closed, must stay visible so it can be cancelled
+async function adoptUnfinishedInstalls() {
+  const root = await steamctl.root();
+  if (!root) return;
+  for (const g of steamGames.filter((x) => x.unfinished && !steamJobs.has(x.id))) {
+    const file = steamctl.manifestPath(root, g.id);
+    if (file) steamJobs.set(g.id, { id: g.id, name: g.name, kind: 'install', file, state: 'queued', got: 0, changed: Date.now(), started: Date.now() });
+  }
+  if (steamJobs.size && !steamPoll) steamPoll = setInterval(() => pollSteamJobs().catch(() => {}), 1000);
 }
 
 ipcMain.handle('steam:control', (_e, action, id) => (['pause', 'resume', 'cancel'].includes(action) ? controlSteamJob(action, id) : { ok: false, error: 'Unknown action' }));
 ipcMain.handle('store:browse', (_e, q) => storeCall(() => store.browse(q || {}, region(), storeFetch)));
 ipcMain.handle('store:tags', () => storeCall(() => store.tags(storeFetch)));
 ipcMain.handle('steam:job', (_e, kind, items) => (kind === 'install' || kind === 'update' ? startSteamJobs(kind, items) : { ok: false, error: 'Unknown job' }));
+
+// ---------------------------------------------------------------- buying
+// Steam's real store and checkout, shown inside Kinetic's window so it works fullscreen with a controller.
+// There is no preload, the sign-in lives in its own storage, and only https pages can load. Controller input
+// arrives as ordinary key presses. On Steam's own pages the D-pad also runs BUY_NAV below, which only moves focus.
+// Payment providers such as PayPal are other sites, so the bar above the page always shows the current site.
+const BUY_BAR = 56;
+const buyPartition = 'persist:steam-store';
+const buyPrefs = { partition: buyPartition, sandbox: true, contextIsolation: true, nodeIntegration: false };
+let buyView = null, buyTimer = null, buyReserve = 0, buySessionGuarded = false;
+let buyReady = false; // the D-pad waits for this, so it can't select something before the buy button is found
+
+function guardBuySession(s) {
+  if (buySessionGuarded) return;
+  buySessionGuarded = true;
+  s.setPermissionRequestHandler((_wc, _perm, done) => done(false));
+  s.setPermissionCheckHandler(() => false);
+  s.on('will-download', (e) => e.preventDefault());
+}
+
+function guardBuyPage(contents, onSite) {
+  const secure = (url) => url.startsWith('https://');
+  const showSite = () => { try { onSite(new URL(contents.getURL()).host); } catch {} };
+  contents.on('will-navigate', (e, url) => { if (!secure(url)) e.preventDefault(); });
+  contents.on('will-redirect', (e, url) => { if (!secure(url)) e.preventDefault(); });
+  contents.on('did-navigate', showSite);
+  contents.on('did-navigate-in-page', showSite);
+  contents.setWindowOpenHandler(({ url }) => (secure(url)
+    ? { action: 'allow', overrideBrowserWindowOptions: { parent: win, autoHideMenuBar: true, webPreferences: buyPrefs } }
+    : { action: 'deny' }));
+  contents.on('did-create-window', (child) => {
+    child.on('page-title-updated', (e) => e.preventDefault());
+    guardBuyPage(child.webContents, (host) => child.setTitle(`Kinetic checkout: ${host}`));
+  });
+}
+
+function layoutBuyView() {
+  if (!buyView || !win) return;
+  const [width, height] = win.getContentSize();
+  buyView.setBounds({ x: 0, y: BUY_BAR, width, height: Math.max(100, height - BUY_BAR - buyReserve) });
+}
+
+function closeBuyView() {
+  if (!buyView) return;
+  clearInterval(buyTimer);
+  const view = buyView;
+  buyView = null;
+  buyReserve = 0;
+  if (win && !win.isDestroyed()) { win.contentView.removeChildView(view); win.off('resize', layoutBuyView); win.webContents.focus(); }
+  view.webContents.close();
+  send('buy:state', { open: false });
+}
+
+ipcMain.handle('store:buy', (_e, id, name) => {
+  const appid = Number(id);
+  if (!Number.isInteger(appid) || !win) return { ok: false, error: 'Unknown game' };
+  closeBuyView();
+  buyView = new WebContentsView({ webPreferences: buyPrefs });
+  guardBuySession(buyView.webContents.session);
+  guardBuyPage(buyView.webContents, (host) => send('buy:state', { open: true, host }));
+  win.contentView.addChildView(buyView);
+  win.on('resize', layoutBuyView);
+  layoutBuyView();
+  // Esc always leaves, whatever the page is doing; the check runs outside the page
+  buyView.webContents.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); closeBuyView(); }
+  });
+  buyView.webContents.on('did-finish-load', () => {
+    keepPadFocus();
+    const c = buyView && buyView.webContents;
+    if (!c || !isSteamPage(c)) { buyReady = true; return; }
+    c.insertCSS('[data-kinetic-focus] { outline: 3px solid #fff !important; outline-offset: 2px !important; }');
+    // the page can finish drawing after it loads, so this tries again briefly
+    if (!/\/app\/\d+/.test(c.getURL())) { buyReady = true; return; }
+    for (const ms of [0, 800, 2000]) {
+      setTimeout(async () => {
+        if (c.isDestroyed()) return;
+        const r = await selectBuyButton(c);
+        if (r !== 'none' || ms === 2000) buyReady = true;
+      }, ms);
+    }
+  });
+  buyReady = false;
+  setTimeout(() => { buyReady = true; }, 8000); // a page that never finishes loading must not lock the D-pad
+  buyView.webContents.loadURL(`https://store.steampowered.com/app/${appid}/`);
+  keepPadFocus();
+  send('buy:state', { open: true, host: 'store.steampowered.com' });
+
+  // Steam adds a bought game to the account by itself, so ownership shows when the purchase is complete
+  const check = async () => {
+    if (!(await steamlive.connect())) return;
+    if (await steamlive.owned(appid).catch(() => false)) {
+      clearInterval(buyTimer);
+      send('store:bought', appid, name);
+    }
+  };
+  clearInterval(buyTimer);
+  buyTimer = setInterval(() => check().catch(() => {}), 3000);
+  return { ok: true };
+});
+
+// Kinetic's page reads the controller, and that stops if the checkout page holds the focus, so focus goes back
+// to Kinetic straight after each input is delivered
+let padFocusTimer = null;
+function keepPadFocus() {
+  clearTimeout(padFocusTimer);
+  padFocusTimer = setTimeout(() => { if (win && !win.isDestroyed() && win.isFocused()) win.webContents.focus(); }, 40);
+}
+
+ipcMain.handle('buy:close', () => closeBuyView());
+ipcMain.handle('buy:reserve', (_e, px) => { buyReserve = Math.max(0, Number(px) || 0); layoutBuyView(); });
+
+// Moves focus to the nearest control on screen in that direction, so the D-pad continues from where the page is
+// scrolled to. Runs in an isolated world on Steam's domains only, on each press. It looks at element positions and
+// never reads field values. Tab would jump back to the last focused link, however far the page was scrolled.
+const BUY_NAV = `(dir) => {
+  const cur = document.querySelector('[data-kinetic-focus]') || document.activeElement;
+  if (cur && cur.tagName === 'SELECT' && (dir === 'up' || dir === 'down')) return 'key';
+  const onScreen = (r) => r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight;
+  const list = [...document.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,[role=button],[tabindex="0"]')]
+    .filter((e) => !e.disabled && onScreen(e.getBoundingClientRect()) && getComputedStyle(e).visibility !== 'hidden');
+  const scroll = () => { scrollBy(0, dir === 'up' ? -innerHeight * 0.5 : dir === 'down' ? innerHeight * 0.5 : 0); return 'scrolled'; };
+  // some matches can't really take focus, so the next best is tried until one does
+  const tryAll = (ranked) => {
+    for (const e of ranked) {
+      e.focus({ preventScroll: true });
+      if (document.activeElement === e) {
+        document.querySelectorAll('[data-kinetic-focus]').forEach((x) => x.removeAttribute('data-kinetic-focus'));
+        e.setAttribute('data-kinetic-focus', '');
+        e.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return 'moved';
+      }
+    }
+    return scroll();
+  };
+  const here = cur && cur !== document.body && onScreen(cur.getBoundingClientRect()) ? cur.getBoundingClientRect() : null;
+  if (!here) {
+    const mid = innerHeight / 2, gap = (e) => Math.abs(e.getBoundingClientRect().top - mid);
+    return tryAll(list.sort((a, b) => gap(a) - gap(b)));
+  }
+  const cx = here.left + here.width / 2, cy = here.top + here.height / 2;
+  const ranked = [];
+  for (const e of list) {
+    if (e === cur) continue;
+    const r = e.getBoundingClientRect();
+    const dx = r.left + r.width / 2 - cx, dy = r.top + r.height / 2 - cy;
+    const along = { up: -dy, down: dy, left: -dx, right: dx }[dir];
+    if (along > 4) ranked.push({ e, sum: along + Math.abs(dir === 'up' || dir === 'down' ? dx : dy) * 3 });
+  }
+  return tryAll(ranked.sort((x, y) => x.sum - y.sum).map((x) => x.e));
+}`;
+// Selects the first purchase button on a game's page. Steam's page only marks it by class and label.
+const BUY_START = `(() => {
+  if (document.querySelector('[data-kinetic-focus]')) return 'already';
+  const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const list = [...document.querySelectorAll('.game_area_purchase_game .btn_addtocart a, .game_purchase_action .btn_addtocart a, .btn_addtocart a')].filter(shown);
+  const e = list[0] || [...document.querySelectorAll('#game_area_purchase a[href], #game_area_purchase button')].filter(shown).find((x) => /add to cart|buy|purchase/i.test(x.textContent));
+  if (!e) return 'none';
+  e.focus({ preventScroll: true });
+  e.setAttribute('data-kinetic-focus', '');
+  e.scrollIntoView({ block: 'center' });
+  return 'selected: ' + e.textContent.trim();
+})()`;
+const selectBuyButton = (c) => c.executeJavaScriptInIsolatedWorld(999, [{ code: BUY_START }]).catch(() => 'none');
+// focus can be lost while Kinetic holds it, so the marked control is focused again before it is pressed
+const refocusMarked = (c) => c.executeJavaScriptInIsolatedWorld(999, [{ code: `document.querySelector('[data-kinetic-focus]')?.focus({ preventScroll: true })` }]).catch(() => {});
+
+const isSteamPage = (c) => { try { return /(^|\.)(steampowered|steamcommunity)\.com$/.test(new URL(c.getURL()).hostname); } catch { return false; } };
+const ARROWS = { up: 'Up', down: 'Down', left: 'Left', right: 'Right' };
+
+const BUY_KEYS = { up: ['Tab', ['shift']], down: ['Tab', []], left: ['Left', []], right: ['Right', []], enter: ['Return', []], space: ['Space', []], backspace: ['Backspace', []] };
+ipcMain.handle('buy:input', async (_e, action, value) => {
+  if (!buyView) return;
+  const c = buyView.webContents;
+  c.focus();
+  if (ARROWS[action] && !buyReady) return;
+  if (ARROWS[action] && isSteamPage(c)) {
+    const did = await c.executeJavaScriptInIsolatedWorld(999, [{ code: `(${BUY_NAV})(${JSON.stringify(action)})` }]).catch((err) => String(err));
+    if (did === 'key') { c.sendInputEvent({ type: 'keyDown', keyCode: ARROWS[action] }); c.sendInputEvent({ type: 'keyUp', keyCode: ARROWS[action] }); }
+  } else if (action === 'scroll') {
+    const [width] = win.getContentSize();
+    c.sendInputEvent({ type: 'mouseWheel', x: Math.round(width / 2), y: 300, deltaX: 0, deltaY: -Number(value) || 0 });
+  } else if (action === 'char') {
+    c.sendInputEvent({ type: 'char', keyCode: String(value).slice(0, 1) });
+  } else if (BUY_KEYS[action]) {
+    const [keyCode, modifiers] = BUY_KEYS[action];
+    if (isSteamPage(c)) await refocusMarked(c);
+    c.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+    if (action === 'enter') c.sendInputEvent({ type: 'char', keyCode: '\r', modifiers });
+    if (action === 'space') c.sendInputEvent({ type: 'char', keyCode: ' ', modifiers });
+    c.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+  }
+  keepPadFocus();
+});

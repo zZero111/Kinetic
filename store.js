@@ -5,7 +5,7 @@ const HOME_TTL = 10 * 60 * 1000;
 let homeCache = null;
 
 async function getJson(fetchFn, url) {
-  const res = await fetchFn(url);
+  const res = await Promise.race([fetchFn(url), new Promise((_, reject) => setTimeout(() => reject(new Error('Steam took too long to answer')), 10000))]);
   if (!res.ok) throw new Error(`Steam store returned ${res.status}`);
   return res.json();
 }
@@ -35,6 +35,14 @@ async function search(term, cc, fetchFn) {
   }));
 }
 
+// the size a game lists under its PC requirements, in bytes; 0 when it doesn't say
+function storageNeeded(req) {
+  const text = String((req && (req.recommended || req.minimum)) || '').replace(/<[^>]+>/g, ' ');
+  const m = /(?:storage|hard (?:disk|drive)(?: space)?)\s*:?\s*([\d.,]+)\s*(GB|MB|TB)/i.exec(text);
+  if (!m) return 0;
+  return parseFloat(m[1].replace(',', '.')) * { MB: 1e6, GB: 1e9, TB: 1e12 }[m[2].toUpperCase()];
+}
+
 async function details(id, cc, fetchFn) {
   const r = await getJson(fetchFn, `${BASE}/appdetails?appids=${id}&l=english&cc=${cc}`);
   const entry = r[id];
@@ -48,6 +56,7 @@ async function details(id, cc, fetchFn) {
     developers: d.developers || [],
     released: d.release_date ? d.release_date.date : '', comingSoon: !!(d.release_date && d.release_date.coming_soon),
     screenshots: (d.screenshots || []).slice(0, 6).map((s) => s.path_thumbnail),
+    storage: storageNeeded(d.pc_requirements),
   };
 }
 
@@ -96,4 +105,4 @@ async function tags(fetchFn) {
   return tagCache;
 }
 
-module.exports = { home, search, details, browse, tags, parseRows };
+module.exports = { home, search, details, browse, tags, parseRows, storageNeeded };

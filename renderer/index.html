@@ -61,6 +61,9 @@
   </footer>
 </div>
 <div id="toast"></div>
+<div id="buy-bar" hidden><button id="buy-close" type="button">&lsaquo; Back to Kinetic</button><span id="buy-host"></span><span id="buy-hints"></span></div>
+<div id="osk" hidden></div>
+<div id="pad-hints" hidden></div>
 <div id="jobs" hidden>
   <button id="jobs-head" type="button"><b id="jobs-title">Downloads</b><span id="jobs-sum"></span><i id="jobs-toggle"></i></button>
   <div id="jobs-list"></div>
@@ -134,7 +137,7 @@
 <dialog id="store-item">
   <form method="dialog">
     <div id="si-body"></div>
-    <div class="row settings-actions"><span class="spacer"></span><button value="cancel">Close</button><button type="button" id="si-open">Buy in Steam</button><button type="button" id="si-install" class="primary">Install</button></div>
+    <div class="row settings-actions"><select id="si-lib" title="Install to" hidden></select><small id="si-space"></small><span class="spacer"></span><button value="cancel">Close</button><button type="button" id="si-open">Buy</button><button type="button" id="si-install" class="primary">Download</button></div>
   </form>
 </dialog>
 

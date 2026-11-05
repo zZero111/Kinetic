@@ -248,3 +248,21 @@ body::before { width: min(26vw, 420px); height: min(14vh, 120px); }
 .job-stage .bar { grid-column: 1 / -1; height: 5px; margin: 0; max-width: none; }
 .job-detail { grid-column: 1 / -1; }
 .job-btns { grid-column: 1 / -1; justify-content: flex-end; }
+#si-lib { background: #070810; border: 1px solid #2c3042; padding: 7px 8px; }
+#si-space { color: var(--text-dim); }
+#si-space.bad { color: var(--danger); }
+
+/* controller */
+body.pad { cursor: none; }
+body.pad :focus { outline: 3px solid #fff; outline-offset: 2px; }
+#pad-hints { position: fixed; left: 44px; bottom: 8px; z-index: 45; font-size: 15px; letter-spacing: 1px; color: var(--text-dim); background: rgba(7,8,15,.85); padding: 2px 8px; }
+#osk { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; background: #0f111b; border-top: 3px solid var(--accent); padding: 12px; display: grid; justify-items: center; gap: 6px; }
+.osk-show { min-height: 28px; font-family: var(--font-body); font-size: 18px; }
+.osk-row { display: flex; gap: 6px; }
+.osk-key { min-width: 52px; padding: 8px 12px; text-align: center; background: #1b1e2d; font-size: 20px; font-weight: 700; }
+.osk-key.on { background: var(--accent); }
+.osk-help { color: var(--text-dim); font-size: 15px; }
+#buy-bar { position: fixed; left: 0; right: 0; top: 0; height: 56px; z-index: 55; display: flex; align-items: center; gap: 16px; padding: 0 14px; background: #0f111b; border-bottom: 2px solid var(--accent); }
+#buy-close { background: #1b1e2d; border: 1px solid #343850; padding: 7px 12px; }
+#buy-host { font-family: var(--font-body); font-weight: 600; }
+#buy-hints { margin-left: auto; color: var(--text-dim); font-size: 15px; }

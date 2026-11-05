@@ -8,11 +8,11 @@ let socket = null;
 let nextId = 0;
 const waiting = new Map();
 
-function evaluate(expression) {
+function evaluate(expression, wait = 5000) {
   return new Promise((resolve, reject) => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return reject(new Error('Not connected to Steam'));
     const id = ++nextId;
-    const timer = setTimeout(() => { waiting.delete(id); reject(new Error('Steam did not answer')); }, 5000);
+    const timer = setTimeout(() => { waiting.delete(id); reject(new Error('Steam did not answer')); }, wait);
     waiting.set(id, (msg) => {
       clearTimeout(timer);
       const r = msg.result || {};
@@ -85,6 +85,48 @@ function readOverview(o, appid, downloadTotal, stageTotal) {
   };
 }
 
+const owned = (appid) => evaluate(`SteamClient.Apps.GetIsSubscribedApp(${Number(appid)})`);
+
+// Answers Steam's install prompt for the user. Steam reports state 7 when it is ready for a folder, and by then it
+// knows the real size, so a game that does not fit is cancelled before anything happens. Only ever called for free
+// or already-owned games: the prompt cannot buy anything, and paid games never reach it.
+function install(appid, libraryPath, freeBytes) {
+  const id = Number(appid);
+  if (!Number.isInteger(id)) return Promise.reject(new Error('Unknown game'));
+  return evaluate(`new Promise(async (done) => {
+    const want = ${JSON.stringify(String(libraryPath).toLowerCase())}, free = ${Number(freeBytes) || 0};
+    const folders = await SteamClient.InstallFolder.GetInstallFolders();
+    const match = folders.find((f) => String(f.strFolderPath).toLowerCase().replace(/[\\\\/]+$/, '') === want.replace(/[\\\\/]+$/, ''));
+    let answered = false, handle = null;
+    const finish = (r) => { try { handle.unregister(); } catch {} done(r); };
+    handle = SteamClient.Installs.RegisterForShowInstallWizard((e) => {
+      if (e.eAppError) { SteamClient.Installs.CancelInstall(); finish({ ok: false, error: e.errorDetail || 'Steam refused the install' }); return; }
+      if (e.eInstallState !== 7 || answered) return;
+      answered = true;
+      if (free && e.nDiskSpaceRequired > free) { SteamClient.Installs.CancelInstall(); finish({ ok: false, space: e.nDiskSpaceRequired }); return; }
+      if (match) SteamClient.Installs.SetInstallFolder(match.nFolderIndex);
+      SteamClient.Installs.ContinueInstall();
+      setTimeout(() => finish({ ok: true, need: e.nDiskSpaceRequired, folderFound: !!match }), 1500);
+    });
+    setTimeout(() => { if (!answered) { SteamClient.Installs.CancelInstall(); finish({ ok: false, error: 'Steam did not get ready' }); } }, 20000);
+    SteamClient.URL.ExecuteSteamURL('steam://install/${id}');
+  })`, 25000);
+}
+
+// Steam's windows are separate pages, so each one is told to hide itself
+async function hideWindows() {
+  const res = await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(1000) });
+  const targets = (await res.json()).filter((t) => /^(Steam|Install)$/.test(t.title));
+  await Promise.all(targets.map((t) => new Promise((resolve) => {
+    const ws = new WebSocket(t.webSocketDebuggerUrl);
+    const end = () => { try { ws.terminate(); } catch {} resolve(); };
+    const timer = setTimeout(end, 800);
+    ws.on('open', () => ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: 'SteamClient.Window.HideWindow()' } })));
+    ws.on('message', () => { clearTimeout(timer); end(); });
+    ws.on('error', () => { clearTimeout(timer); end(); });
+  })));
+}
+
 const queuedIds = (items) => (items || []).flatMap((c) => c.item_data || []).map((i) => String(i.appid)).filter((id) => /^\d+$/.test(id));
 
-module.exports = { connect, snapshot, command, readOverview, queuedIds, setPort: (p) => { port = p; } };
+module.exports = { connect, snapshot, command, owned, install, hideWindows, readOverview, queuedIds, setPort: (p) => { port = p; } };
