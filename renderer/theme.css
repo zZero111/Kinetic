@@ -1,0 +1,15 @@
+/* Edit these values to restyle the whole launcher. */
+:root {
+  --bg: #07080f;
+  --panel: #12141f;
+  --panel-hover: #1b1e2d;
+  --text: #ffffff;
+  --text-dim: #8d92a6;
+  --accent: #e8132b;
+  --accent-text: #ffffff;
+  --danger: #ff5a5a;
+  --line: rgba(255, 255, 255, .22);
+  --skew: -8deg;
+  --font: "Bahnschrift", "Arial Narrow", "Impact", sans-serif;
+  --font-body: "Segoe UI", system-ui, sans-serif;
+}

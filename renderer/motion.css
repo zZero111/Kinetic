@@ -1,0 +1,206 @@
+/* ---------- cover fitting ---------- */
+.cover-frame { background: #0a0a10; }
+.cover-frame .blur { position: absolute; inset: -10%; width: 120%; height: 120%; object-fit: cover; filter: blur(22px) brightness(.6); }
+.cover-frame img.main { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.cover-frame img.main.fill { object-fit: cover; }
+
+/* ---------- richer feature card ---------- */
+#feature .bg { filter: blur(26px) saturate(1.2) brightness(.55); }
+#feature.hero .bg { filter: blur(2px) saturate(1.1) brightness(.62); inset: -6px; }
+#feature .tint { background: linear-gradient(90deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.35) 55%, rgba(0,0,0,.1) 100%), radial-gradient(circle at 75% 25%, hsla(var(--hue), 70%, 55%, .35), transparent 60%); }
+#feature { gap: 3.5vw; }
+.detail { justify-content: center; gap: 0; }
+.dtitle { font-size: clamp(34px, 9vh, 84px); }
+.ddesc { font-size: clamp(15px, 2.3vh, 21px); max-width: 720px; margin-bottom: clamp(10px, 2.4vh, 26px); }
+.stats, .bar { max-width: 760px; }
+.stat { padding: clamp(5px, 1.3vh, 14px) 0; }
+.stat span { font-size: clamp(20px, 3.6vh, 34px); }
+.stat label { font-size: clamp(13px, 1.8vh, 16px); }
+.bar { height: 10px; margin: clamp(12px, 2.4vh, 26px) 0 clamp(14px, 3vh, 30px); }
+.btn { font-size: clamp(18px, 2.8vh, 26px); padding: clamp(10px, 1.8vh, 18px) clamp(20px, 2.4vw, 34px); }
+.btn.play { padding-left: clamp(40px, 4.5vw, 80px); padding-right: clamp(40px, 4.5vw, 80px); }
+@media (max-height: 760px) { .stats .stat:nth-child(4) { display: none; } }
+.stat span.bad { color: var(--danger); }
+
+/* ---------- SteamGridDB pickers ---------- */
+.sgdb-grid { grid-template-columns: repeat(4, 1fr); }
+.sgdb-grid img { object-fit: contain; background: repeating-conic-gradient(#1c1f2e 0% 25%, #12141f 0% 50%) 0 0 / 16px 16px; aspect-ratio: 3/4; }
+.sgdb-grid.logo, .sgdb-grid.wide { grid-template-columns: repeat(2, 1fr); }
+.sgdb-grid.logo img, .sgdb-grid.wide img { aspect-ratio: 16/9; }
+.sgdb-grid.wide img { object-fit: cover; }
+.sgdb-grid.icon { grid-template-columns: repeat(6, 1fr); }
+.sgdb-grid.icon img { aspect-ratio: 1; }
+
+/* ---------- motion ---------- */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+@keyframes slideInR { from { opacity: 0; transform: translateX(70px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes slideInL { from { opacity: 0; transform: translateX(-70px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes bgIn { from { opacity: 0; transform: scale(1.08); } to { opacity: 1; transform: scale(1); } }
+@keyframes stripIn { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: none; } }
+@keyframes wedge { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes grow { from { width: 0; } }
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.35) rotate(-8deg); } 100% { transform: scale(1); } }
+@keyframes dlgIn { from { opacity: 0; transform: translateY(24px) scale(.97); } to { opacity: 1; transform: none; } }
+
+body::before { animation: wedge .5s cubic-bezier(.2,.8,.2,1) both; }
+body::after { animation: wedge .5s cubic-bezier(.2,.8,.2,1) both reverse; }
+header > * { animation: fadeUp .35s cubic-bezier(.2,.8,.2,1) both; }
+header > *:nth-child(2) { animation-delay: .03s; } header > *:nth-child(3) { animation-delay: .06s; }
+header > *:nth-child(4) { animation-delay: .09s; } header > *:nth-child(5) { animation-delay: .12s; }
+footer > * { animation: fadeUp .35s .1s cubic-bezier(.2,.8,.2,1) both; }
+
+#stage .bg { animation: bgIn .9s cubic-bezier(.2,.8,.2,1) both; }
+#stage.anim-next .cover-frame, #stage.anim-in .cover-frame { animation: slideInR .55s cubic-bezier(.2,.8,.2,1) both; }
+#stage.anim-prev .cover-frame { animation: slideInL .55s cubic-bezier(.2,.8,.2,1) both; }
+#stage[class*="anim-"] .detail > * { animation: fadeUp .55s cubic-bezier(.2,.8,.2,1) both; }
+#stage[class*="anim-"] .detail > :nth-child(1) { animation-delay: .08s; }
+#stage[class*="anim-"] .detail > :nth-child(2) { animation-delay: .14s; }
+#stage[class*="anim-"] .detail > :nth-child(3) { animation-delay: .2s; }
+#stage[class*="anim-"] .detail > :nth-child(4) { animation-delay: .26s; }
+#stage[class*="anim-"] .detail > :nth-child(5) { animation-delay: .38s; }
+#stage[class*="anim-"] .detail > :nth-child(6) { animation-delay: .44s; }
+#stage[class*="anim-"] .stat { animation: fadeUp .5s both; }
+#stage[class*="anim-"] .stat:nth-child(1) { animation-delay: .24s; }
+#stage[class*="anim-"] .stat:nth-child(2) { animation-delay: .3s; }
+#stage[class*="anim-"] .stat:nth-child(3) { animation-delay: .36s; }
+#stage[class*="anim-"] .stat:nth-child(4) { animation-delay: .42s; }
+#stage[class*="anim-"] .stat:nth-child(5) { animation-delay: .48s; }
+#stage[class*="anim-"] .bar i { animation: grow .9s .5s cubic-bezier(.2,.8,.2,1) both; }
+#stage[class*="anim-"] .strip { animation: stripIn .55s cubic-bezier(.2,.8,.2,1) both; }
+#stage[class*="anim-"] .strip:nth-child(2) { animation-delay: .06s; }
+#stage[class*="anim-"] .strip:nth-child(3) { animation-delay: .12s; }
+#stage[class*="anim-"] .strip:nth-child(4) { animation-delay: .18s; }
+
+.strip { transition: transform .25s cubic-bezier(.2,.8,.2,1), filter .25s; }
+.strip:hover { transform: translateY(-10px); filter: brightness(1.35); }
+.strip .sbg { transition: opacity .3s, transform .6s; }
+.strip:hover .sbg { opacity: .6; transform: scale(1.1); }
+.btn, .tab, .icon-btn, .pager button { transition: background .18s, color .18s, transform .15s, filter .18s, border-color .18s; }
+.btn:hover { transform: translateY(-2px); }
+.tab:hover { transform: skewX(var(--skew)) translateY(-2px); }
+.icon-btn:hover, .pager button:hover { transform: skewX(var(--skew)) translateY(-2px); }
+.btn:active { transform: translateY(1px) scale(.97); }
+.btn.fav.pop { animation: pop .45s; }
+.dots i { transition: width .35s cubic-bezier(.2,.8,.2,1), background .35s; }
+dialog[open] { animation: dlgIn .3s cubic-bezier(.2,.8,.2,1); }
+dialog::backdrop { backdrop-filter: blur(3px); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* keep everything inside the card at ~800px tall windows */
+.dtitle { font-size: clamp(30px, 7vh, 64px); }
+.ddesc { font-size: clamp(14px, 2vh, 19px); margin-bottom: clamp(8px, 1.6vh, 20px); }
+.stat { padding: clamp(4px, .9vh, 11px) 0; }
+.stat span { font-size: clamp(18px, 3vh, 30px); }
+.bar { margin: clamp(10px, 1.8vh, 22px) 0 clamp(12px, 2.2vh, 24px); }
+.btn { padding-top: clamp(9px, 1.4vh, 15px); padding-bottom: clamp(9px, 1.4vh, 15px); }
+.detail { min-height: 0; overflow: hidden; }
+
+/* ---------- carousel: old card slides out while the new one slides in ---------- */
+/* conveyor: the whole card + strips slide as one unit; old and new sit side by side, never overlapping */
+@keyframes carInNext { from { transform: translateX(calc(100% + 60px)); } to { transform: none; } }
+@keyframes carInPrev { from { transform: translateX(calc(-100% - 60px)); } to { transform: none; } }
+@keyframes carOutNext { from { transform: none; } to { transform: translateX(calc(-100% - 60px)); } }
+@keyframes carOutPrev { from { transform: none; } to { transform: translateX(calc(100% + 60px)); } }
+#stage { position: relative; overflow-x: clip; }
+.track { flex: 1; min-width: 0; display: flex; gap: 14px; }
+#stage.anim-next .track:not(.leaving) { animation: carInNext .6s cubic-bezier(.3,.7,.2,1) both; }
+#stage.anim-prev .track:not(.leaving) { animation: carInPrev .6s cubic-bezier(.3,.7,.2,1) both; }
+#stage.anim-next *, #stage.anim-prev * { animation-delay: 0s !important; }
+#stage.anim-next .detail > *, #stage.anim-prev .detail > *, #stage.anim-next .stat, #stage.anim-prev .stat,
+#stage.anim-next .strip, #stage.anim-prev .strip, #stage.anim-next .cover-frame, #stage.anim-prev .cover-frame,
+#stage.anim-next #feature .bg, #stage.anim-prev #feature .bg, #stage.anim-next #feature, #stage.anim-prev #feature { animation: none !important; }
+#stage .leaving { position: absolute; inset: 0; margin: 0; pointer-events: none; }
+.leaving, .leaving * { animation: none; }
+.leaving.out-next { animation: carOutNext .6s cubic-bezier(.3,.7,.2,1) both !important; }
+.leaving.out-prev { animation: carOutPrev .6s cubic-bezier(.3,.7,.2,1) both !important; }
+
+/* ---------- themed scrollbars ---------- */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0a0b14; border-left: 1px solid #1b1e2d; }
+::-webkit-scrollbar-thumb { background: var(--accent); border: 2px solid #0a0b14; }
+::-webkit-scrollbar-thumb:hover { background: #ff3b52; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-corner { background: #0a0b14; }
+
+/* ---------- input glyphs ---------- */
+.hint kbd { min-width: 38px; text-align: center; transition: background .2s, color .2s; }
+.hint kbd.ps-cross { background: #3b6fe0; color: #fff; }
+.hint kbd.ps-square { background: #d94f9a; color: #fff; }
+.hint kbd.ps-triangle { background: #2fb877; color: #fff; }
+.hint kbd.xb-a { background: #3cb44b; color: #fff; }
+.hint kbd.xb-x { background: #2f6fe0; color: #fff; }
+.hint kbd.xb-y { background: #e6b800; color: #000; }
+.hint { animation: fadeUp .35s both; }
+
+/* strips share the focus card's slant: every edge leans the same 20px */
+#feature { clip-path: polygon(0 0, 100% 0, calc(100% - 20px) 100%, 0 100%); }
+.strip { width: 100px; margin-left: -14px; clip-path: polygon(20px 0, 100% 0, calc(100% - 20px) 100%, 0 100%); padding-left: 10px; }
+.strip:first-child { margin-left: 0; }
+#strips { gap: 0; }
+.strip + .strip { margin-left: -6px; }
+
+/* strip text leans with the strip's edges (20px over the strip height) */
+.strip .sin { position: relative; display: flex; flex-direction: column; align-items: center; width: 100%; height: 100%; transform: skewX(-1.8deg); transform-origin: 50% 50%; }
+.strip .sname { margin-top: auto; }
+
+/* ---------- import dropdown ---------- */
+@keyframes menuIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+.menu { position: relative; }
+.menu-list { display: none; position: absolute; right: 0; top: calc(100% + 8px); min-width: 250px; background: #0f111b; border: 2px solid var(--accent); z-index: 20; flex-direction: column; box-shadow: 0 12px 30px rgba(0,0,0,.6); }
+.menu.open .menu-list { display: flex; animation: menuIn .18s cubic-bezier(.2,.8,.2,1); }
+.menu-list button { background: transparent; border: 0; border-bottom: 1px solid #1b1e2d; text-align: left; padding: 12px 16px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; font-size: 16px; display: flex; flex-direction: column; gap: 2px; }
+.menu-list button:last-child { border-bottom: 0; }
+.menu-list button small { font-family: var(--font-body); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-dim); font-size: 12px; }
+.menu-list button:hover { background: var(--accent); }
+.menu-list button:hover small { color: #fff; }
+header { position: relative; z-index: 10; }
+
+/* pager sits on the red corner wedge, so the current number must not be red */
+body::before { width: min(26vw, 420px); height: min(14vh, 120px); }
+#pager-count b { color: #fff; text-shadow: 3px 3px 0 rgba(0,0,0,.45); }
+#pager-count { color: rgba(255,255,255,.85); text-shadow: 3px 3px 0 rgba(0,0,0,.35); }
+
+.menu-label { padding: 8px 16px 4px; font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); border-top: 1px solid #1b1e2d; background: #0b0c14; }
+.imp-list { max-height: 46vh; overflow: auto; border: 1px solid #1b1e2d; }
+.imp-row { display: flex; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #14172a; cursor: pointer; color: #fff; margin: 0; flex-direction: row; font-size: 15px; }
+.imp-row:hover { background: #151829; }
+.imp-row small { color: var(--text-dim); margin-left: auto; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; }
+.imp-row.done { opacity: .45; cursor: default; }
+
+/* settings layout: grouped sections, Save/Cancel always visible */
+#settings h3.first { margin-top: 0; }
+#settings h3 { border-top: 1px solid #1b1e2d; padding-top: 14px; }
+#settings h3.first { border-top: 0; padding-top: 0; }
+.hint-text { display: block; color: #8d92a6; margin: -4px 0 10px; line-height: 1.5; font-size: 12.5px; }
+.settings-actions { position: sticky; bottom: -26px; margin: 18px -30px -26px; padding: 14px 30px; background: #0f111b; border-top: 1px solid #1b1e2d; }
+
+/* star button was clipped by the slanted card edge: let the row shrink and keep room for the slant */
+.detail { overflow: visible; padding-right: 26px; }
+.actions { flex-wrap: nowrap; max-width: 760px; }
+.actions .btn { flex: 0 0 auto; }
+.actions .btn.play { flex: 1 1 auto; min-width: 0; padding-left: 12px; padding-right: 12px; max-width: 280px; }
+.actions .btn.fav { min-width: 56px; }
+.actions { flex-wrap: wrap; gap: 10px; }
+.actions .btn.play { flex: 1 1 150px; min-width: 150px; }
+.actions .btn { padding-left: clamp(14px, 1.6vw, 28px); padding-right: clamp(14px, 1.6vw, 28px); }
+.actions .btn.play { padding-left: 12px; padding-right: 12px; }
+
+/* strip text angle is computed from the strip's real height so it always matches the 20px edge lean */
+.strip { padding-left: 0; }
+.strip .sin { transform: skewX(calc(var(--lean, 1.8) * -1deg)); }
+
+/* promote the sliding layers only while they animate */
+#stage[class*="anim-"] .track, #stage .leaving { will-change: transform; }
+
+/* first draw and filter/sort changes: no long staggered intro, so the UI looks ready straight away */
+#stage.anim-in *, #stage.anim-in { animation-delay: 0s !important; animation-duration: .28s !important; }
+
+/* update button in the header */
+[hidden] { display: none !important; }
+.update-btn { background: var(--accent); border-color: var(--accent); animation: fadeUp .35s both; }
+.update-btn:disabled { opacity: .8; cursor: default; }
+
+/* keep the pager on screen when the Update button is showing */
+.tools { min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
+#search { width: clamp(60px, 6vw, 110px); min-width: 0; flex: 0 1 auto; }
+.pager { flex: none; }

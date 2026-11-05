@@ -1,0 +1,44 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+const inv = (ch) => (...a) => ipcRenderer.invoke(ch, ...a);
+
+// ask for the library the moment the preload runs, so it is usually ready before the page's scripts start
+const initialGames = ipcRenderer.invoke('library:get');
+
+contextBridge.exposeInMainWorld('api', {
+  getGames: inv('library:get'),
+  initialGames: () => initialGames,
+  addGame: inv('library:add'),
+  addAzimuth: inv('library:addAzimuth'),
+  updateGame: inv('library:update'),
+  removeGame: inv('library:remove'),
+  pickArt: inv('library:pickArt'),
+  pickFolder: inv('dialog:pickFolder'),
+  launch: inv('game:launch'),
+  shortcut: inv('game:shortcut'),
+  addToSteam: inv('game:steam'),
+  openFolder: inv('game:folder'),
+  backupSaves: inv('saves:backup'),
+  openBackups: inv('saves:open'),
+  sgdbSearch: inv('sgdb:search'),
+  sgdbDownload: inv('sgdb:download'),
+  getSettings: inv('settings:get'),
+  setSettings: inv('settings:set'),
+  checkPrereqs: inv('prereq:check'),
+  openPrereq: inv('prereq:open'),
+  testDiscord: inv('discord:test'),
+  updateInfo: inv('update:info'),
+  checkUpdate: inv('update:check'),
+  installUpdate: inv('update:install'),
+  onUpdateAvailable: (cb) => ipcRenderer.on('update:available', (_e, info) => cb(info)),
+  onUpdateProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p)),
+  listDisplays: inv('display:list'),
+  scanImport: inv('import:scan'),
+  addImport: inv('import:add'),
+  backupLibrary: inv('data:backup'),
+  openData: inv('data:open'),
+  toggleFullscreen: inv('window:fullscreen'),
+  onExit: (cb) => ipcRenderer.on('game:exited', (_e, id) => cb(id)),
+  onFailed: (cb) => ipcRenderer.on('game:failed', (_e, id, msg) => cb(id, msg)),
+  onChanged: (cb) => ipcRenderer.on('library:changed', () => cb()),
+});

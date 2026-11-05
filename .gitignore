@@ -1,0 +1,18 @@
+# dependencies and build output
+node_modules/
+dist/
+
+# third-party Azimuth runtime (large, not ours to redistribute)
+azimuth/
+Azimuth/
+
+# logs, temp and OS files
+*.log
+*.bak
+*.launcher-backup
+Thumbs.db
+.DS_Store
+
+# editor / tool folders
+.vscode/
+.claude/

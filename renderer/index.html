@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Game Launcher</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' file: data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="motion.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Library</h1>
+    <div class="slashes"><i></i><i></i><i></i></div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="all"><span>All <b id="c-all">0</b></span></button>
+      <button class="tab" data-tab="fav"><span>Favourites <b id="c-fav">0</b></span></button>
+      <button class="tab" data-tab="recent"><span>Recent <b id="c-recent">0</b></span></button>
+    </div>
+    <div class="tools">
+      <button class="icon-btn update-btn" id="update-btn" hidden>Update</button>
+      <input id="search" type="search" placeholder="SEARCH">
+      <select id="sort" title="Sort">
+        <option value="name">Name</option>
+        <option value="last">Last played</option>
+        <option value="time">Play time</option>
+        <option value="added">Date added</option>
+      </select>
+      <div class="menu" id="import-menu">
+        <button class="icon-btn" id="import-btn" aria-haspopup="true" aria-expanded="false">+ Import &#9662;</button>
+        <div class="menu-list" id="import-list" role="menu">
+          <button id="add" role="menuitem">Add game manually<small>pick an .exe, .bat or .lnk</small></button>
+          <button id="add-azimuth" role="menuitem">From Azimuth<small>Xbox One games</small></button>
+          <div class="menu-label">Game launchers</div>
+          <button data-import="steam" role="menuitem">From Steam<small>installed games</small></button>
+          <button data-import="epic" role="menuitem">From Epic Games<small>installed games</small></button>
+          <button data-import="gog" role="menuitem">From GOG<small>installed games</small></button>
+        </div>
+      </div>
+      <button class="icon-btn" id="open-settings" title="Settings">&#9881;</button>
+      <button class="icon-btn" id="bigpicture" title="Big Picture (F11)">&#9974;</button>
+    </div>
+    <div class="pager">
+      <button id="prev" aria-label="Previous">&lsaquo;</button>
+      <div id="pager-count"><b>00</b> / 00</div>
+      <button id="next" aria-label="Next">&rsaquo;</button>
+    </div>
+  </header>
+
+  <section id="stage"></section>
+
+  <footer>
+    <div class="hint a"><kbd data-k="play"></kbd> Play</div>
+    <div class="hint"><kbd data-k="details"></kbd> Details</div>
+    <div class="hint"><kbd data-k="fav"></kbd> Favourite</div>
+    <div class="dots" id="dots"></div>
+    <div class="hint right" id="h-browse"></div>
+  </footer>
+</div>
+<div id="toast"></div>
+
+<!-- Details / edit -->
+<dialog id="edit">
+  <form method="dialog">
+    <h2>Details</h2>
+    <label>Title <input id="e-title"></label>
+    <label>Description <input id="e-desc" placeholder="short tagline shown on the card"></label>
+    <label>Genre / tag <input id="e-tag" placeholder="e.g. Racing"></label>
+
+    <h3>Launch options</h3>
+    <label>Display mode
+      <select id="e-display">
+        <option value="">Game default</option>
+        <option value="fullscreen">Fullscreen</option>
+        <option value="windowed">Windowed</option>
+      </select>
+    </label>
+    <small class="hint-text" style="margin-top:-6px">Azimuth games: switches Azimuth's display setting. Other games: adds -fullscreen or -windowed, which only works if the game supports those switches.</small>
+    <label>Process priority
+      <select id="e-priority">
+        <option value="">Normal</option>
+        <option value="above">Above normal</option>
+        <option value="high">High</option>
+      </select>
+    </label>
+    <label>Launch arguments <input id="e-args" placeholder="optional"></label>
+    <label>Working directory <input id="e-cwd" placeholder="defaults to the exe's folder"></label>
+    <label>Environment variables <input id="e-env" placeholder="KEY=value;OTHER=1"></label>
+    <label>Run before launch <input id="e-pre" placeholder="optional command, e.g. close an overlay"></label>
+    <label>Run after the game closes <input id="e-post" placeholder="optional command"></label>
+    <label class="check"><input type="checkbox" id="e-admin"> Run as administrator</label>
+
+    <h3>Artwork</h3>
+    <div class="pick"><button type="button" data-art="cover">Cover…</button><small id="n-cover"></small></div>
+    <div class="pick" style="margin-top:6px"><button type="button" data-art="background">Background…</button><small id="n-background"></small></div>
+    <div class="pick" style="margin-top:6px"><button type="button" data-art="logo">Logo…</button><small id="n-logo"></small></div>
+    <div class="pick" style="margin-top:6px"><button type="button" data-art="icon">Icon…</button><small id="n-icon"></small></div>
+    <div class="row"><button type="button" id="e-sgdb">Search SteamGridDB</button><small id="sgdb-msg"></small></div>
+    <div id="sgdb-results"></div>
+
+    <h3>Saves</h3>
+    <label>Save folder <input id="e-save" placeholder="folder to back up"></label>
+    <div class="row">
+      <button type="button" id="e-pick-save">Browse…</button>
+      <button type="button" id="e-backup">Back up saves now</button>
+      <button type="button" id="e-open-backups">Open backups</button>
+    </div>
+
+    <h3>Shortcuts</h3>
+    <div class="row">
+      <button type="button" id="e-desktop">Desktop shortcut</button>
+      <button type="button" id="e-startmenu">Start Menu shortcut</button>
+      <button type="button" id="e-steam">Add to Steam</button>
+      <button type="button" id="e-folder">Open game folder</button>
+    </div>
+
+    <div class="row" style="margin-top:22px">
+      <button type="button" id="e-remove" class="danger">Remove</button>
+      <span class="spacer"></span>
+      <button value="cancel">Cancel</button>
+      <button id="e-saveb" value="save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Import from another launcher -->
+<dialog id="importer">
+  <form method="dialog">
+    <h2 id="imp-title">Import</h2>
+    <p id="imp-msg" style="color:#8d92a6;margin:0 0 10px">Scanning…</p>
+    <div class="row" style="margin:0 0 8px"><button type="button" id="imp-all">Select all</button><button type="button" id="imp-none">Select none</button></div>
+    <div id="imp-list" class="imp-list"></div>
+    <div class="row" style="margin-top:18px"><span class="spacer"></span><button value="cancel">Cancel</button><button type="button" id="imp-go" class="primary">Import selected</button></div>
+  </form>
+</dialog>
+
+<!-- Settings -->
+<dialog id="settings">
+  <form method="dialog">
+    <h2>Settings</h2>
+    <h3 class="first">General</h3>
+    <label>Open the launcher on <select id="s-display"></select></label>
+    <label class="check"><input type="checkbox" id="s-fullscreen"> Start in fullscreen (Big Picture)</label>
+    <label class="check"><input type="checkbox" id="s-startup"> Start with Windows</label>
+    <label class="check"><input type="checkbox" id="s-minimised"> Start minimised to the tray when launched by Windows</label>
+    <label class="check"><input type="checkbox" id="s-tray"> Close button minimises to the tray</label>
+
+    <h3>When a game starts</h3>
+    <label>Launcher behaviour
+      <select id="s-after">
+        <option value="stay">Stay open</option>
+        <option value="minimise">Minimise, and bring back when the game closes</option>
+        <option value="tray">Hide to the tray, and bring back when the game closes</option>
+      </select>
+    </label>
+
+    <h3>Artwork</h3>
+    <label>SteamGridDB API key <input id="s-sgdb" placeholder="optional — fills in covers, backgrounds and logos"></label>
+    <small class="hint-text">Free key from steamgriddb.com/profile/preferences/api</small>
+
+    <h3>Discord</h3>
+    <label>Rich Presence application ID <input id="s-discord" placeholder="optional"></label>
+    <small class="hint-text">
+      1. Open discord.com/developers/applications and click <b>New Application</b>. Its name is what friends see after “Playing”.<br>
+      2. On <b>General Information</b>, copy the <b>Application ID</b> and paste it above.<br>
+      3. Keep the Discord desktop app open while you play.
+      <a href="#" id="s-discord-open" style="color:#ff5a6a">Open the Discord developer page</a>
+    </small>
+    <div class="row" style="margin:0 0 4px"><button type="button" id="s-discord-test">Test Discord connection</button><small id="s-discord-msg" style="color:#8d92a6"></small></div>
+
+    <h3>Updates</h3>
+    <p class="hint-text" id="s-version" style="margin:0 0 8px"></p>
+    <label>GitHub repository <input id="s-repo" placeholder="owner/name, e.g. azuren/kinetic"></label>
+    <label class="check"><input type="checkbox" id="s-autoupdate"> Check for updates when the launcher starts</label>
+    <div class="row" style="margin:0 0 4px">
+      <button type="button" id="s-update-check">Check for updates</button>
+      <button type="button" id="s-update-install" class="primary" hidden>Install update</button>
+      <small id="s-update-msg" style="color:#8d92a6"></small>
+    </div>
+
+    <h3>Prerequisites</h3>
+    <ul class="prereq" id="prereq"><li>Not checked yet.</li></ul>
+    <div class="row">
+      <button type="button" id="s-check">Check prerequisites</button>
+      <button type="button" id="s-vcredist">Download VC++ runtime</button>
+      <button type="button" id="s-dx">Download DirectX runtime</button>
+    </div>
+    <h3>Library</h3>
+    <div class="row">
+      <button type="button" id="s-export">Back up library now</button>
+      <button type="button" id="s-open-data">Open data folder</button>
+    </div>
+    <div class="row settings-actions"><span class="spacer"></span><button value="cancel">Cancel</button><button value="save" class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<script src="renderer.js"></script>
+</body>
+</html>
