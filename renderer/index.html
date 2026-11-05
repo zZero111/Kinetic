@@ -17,6 +17,7 @@
       <button class="tab active" data-tab="all"><span>All <b id="c-all">0</b></span></button>
       <button class="tab" data-tab="fav"><span>Favourites <b id="c-fav">0</b></span></button>
       <button class="tab" data-tab="recent"><span>Recent <b id="c-recent">0</b></span></button>
+      <button class="tab" data-tab="store"><span>Store</span></button>
     </div>
     <div class="tools">
       <button class="icon-btn update-btn" id="update-btn" hidden>Update</button>
@@ -49,6 +50,7 @@
   </header>
 
   <section id="stage"></section>
+  <section id="store" hidden></section>
 
   <footer>
     <div class="hint a"><kbd data-k="play"></kbd> Play</div>
@@ -121,6 +123,14 @@
       <button value="cancel">Cancel</button>
       <button id="e-saveb" value="save" class="primary">Save</button>
     </div>
+  </form>
+</dialog>
+
+<!-- Store game -->
+<dialog id="store-item">
+  <form method="dialog">
+    <div id="si-body"></div>
+    <div class="row settings-actions"><span class="spacer"></span><button value="cancel">Close</button><button type="button" id="si-install">Install with Steam</button><button type="button" id="si-open" class="primary">Open in Steam</button></div>
   </form>
 </dialog>
 

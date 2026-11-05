@@ -113,6 +113,32 @@ async function scanGog() {
   return { games };
 }
 
+// Every installed Steam game and whether Steam has an update waiting (StateFlags bit 2 = update required)
+async function steamState() {
+  const root = await steamRoot();
+  if (!root) return [];
+  const libs = new Set([root]);
+  try {
+    const vdf = await fs.promises.readFile(path.join(root, 'steamapps', 'libraryfolders.vdf'), 'utf8');
+    for (const m of vdf.matchAll(/"path"\s+"([^"]+)"/g)) libs.add(m[1].replace(/\\\\/g, '\\'));
+  } catch {}
+  const found = new Map(); // the same library can be listed twice with different letter case
+  for (const lib of libs) {
+    const apps = path.join(lib, 'steamapps');
+    let files = [];
+    try { files = (await fs.promises.readdir(apps)).filter((f) => /^appmanifest_\d+\.acf$/.test(f)); } catch { continue; }
+    await Promise.all(files.map(async (f) => {
+      try {
+        const acf = await fs.promises.readFile(path.join(apps, f), 'utf8');
+        const get = (k) => new RegExp(`"${k}"\\s+"([^"]*)"`).exec(acf)?.[1];
+        const id = get('appid');
+        if (id && id !== '228980') found.set(id, { id, name: get('name') || id, update: !!(Number(get('StateFlags')) & 2) });
+      } catch {}
+    }));
+  }
+  return [...found.values()];
+}
+
 const scanners = { steam: scanSteam, epic: scanEpic, gog: scanGog };
 
 async function scan(platform) {
@@ -121,4 +147,4 @@ async function scan(platform) {
   try { return await fn(); } catch (err) { return { error: err.message }; }
 }
 
-module.exports = { scan };
+module.exports = { scan, steamState };

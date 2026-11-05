@@ -201,6 +201,7 @@ function buildFeature(g, list) {
   if (g.tag) line.append(el('div', 'tag', g.tag));
   if (g.azimuth) line.append(el('div', 'tag', 'Azimuth'));
   if (g.problem) line.append(el('div', 'tag warn', 'Unavailable'));
+  if (g.updateNeeded) line.append(el('div', 'tag warn', 'Update available'));
   d.append(line);
 
   if (g.logo && g.cover) {
@@ -241,6 +242,12 @@ function buildFeature(g, list) {
   fav.addEventListener('click', () => fav.classList.add('pop'));
   fav.onclick = () => toggleFav(g);
   actions.append(play, details, fav);
+  if (g.updateNeeded) {
+    const up = el('button', 'btn', 'Update');
+    up.title = 'Opens Steam Downloads, where the update runs';
+    up.onclick = () => steamAction('downloads');
+    actions.append(up);
+  }
   d.append(actions);
 
   f.append(frame, d);
@@ -480,9 +487,20 @@ $('add-azimuth').onclick = importAzimuth;
 $('bigpicture').onclick = () => window.api.toggleFullscreen();
 $('prev').onclick = () => select(index - 1);
 $('next').onclick = () => select(index + 1);
-$('search').oninput = () => { index = 0; selectedId = null; render(); };
+$('search').oninput = () => { if (tab === 'store') { storeTyped(); return; } index = 0; selectedId = null; render(); };
 $('sort').onchange = () => render('in');
-document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => { tab = t.dataset.tab; index = 0; selectedId = null; render('in'); }));
+document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => {
+  const wasStore = tab === 'store';
+  tab = t.dataset.tab;
+  index = 0;
+  selectedId = null;
+  if (wasStore !== (tab === 'store')) $('search').value = '';
+  document.body.classList.toggle('in-store', tab === 'store');
+  document.querySelector('header h1').textContent = tab === 'store' ? 'Store' : 'Library';
+  $('store').hidden = tab !== 'store';
+  render('in');
+  if (tab === 'store') showStore();
+}));
 
 // Cancel is a plain button, so Enter in a text box presses Save rather than discarding the edits
 document.querySelectorAll('dialog button[value=cancel]').forEach((b) => {
@@ -500,7 +518,8 @@ window.api.onFailed((id, msg) => {
 });
 
 const importDlg = $('importer');
-const modalOpen = () => dlg.open || settingsDlg.open || importDlg.open;
+// also true on the Store page, where the library's keys and controller buttons must not act
+const modalOpen = () => dlg.open || settingsDlg.open || importDlg.open || $('store-item').open || tab === 'store';
 
 // ---- import installed games from Steam / Epic / GOG
 const PLATFORM_NAMES = { steam: 'Steam', epic: 'Epic Games', gog: 'GOG' };
@@ -651,6 +670,116 @@ new ResizeObserver(() => {
   if (h > 0) document.documentElement.style.setProperty('--lean', (Math.atan(20 / h) * 180 / Math.PI).toFixed(3));
 }).observe(stage);
 
+
+// ---- store
+const storeEl = $('store');
+const itemDlg = $('store-item');
+let storeRun = 0; // only the newest request may draw, so a slow reply can't replace a newer search
+let installedIds = new Set();
+let itemId = null;
+
+async function steamAction(action, id) {
+  const r = await window.api.steamAction(action, id);
+  if (!r.ok) toast(r.error, true);
+}
+
+function priceText(x) {
+  if (!x.final) return 'Free';
+  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: x.currency }).format(x.final / 100); } catch { return String(x.final / 100); }
+}
+
+function storeCard(x) {
+  const b = el('button', 'store-card');
+  b.type = 'button';
+  const img = el('img');
+  img.src = x.image;
+  img.alt = '';
+  img.loading = 'lazy';
+  const foot = el('div', 'sc-foot');
+  if (x.discount) foot.append(el('span', 'sc-off', `-${x.discount}%`));
+  foot.append(el('span', 'sc-price', installedIds.has(String(x.id)) ? 'Installed' : priceText(x)));
+  b.append(img, el('div', 'sc-name', x.name), foot);
+  b.onclick = () => openStoreItem(x.id);
+  return b;
+}
+
+function storeRow(title, items) {
+  if (!items.length) return [];
+  const grid = el('div', 'store-grid');
+  grid.append(...items.map(storeCard));
+  return [el('h2', 'store-h', title), grid];
+}
+
+function storeUpdates(list) {
+  if (!list.length) return [];
+  const box = el('div', 'store-updates');
+  const head = el('div', 'su-head');
+  const go = el('button', 'btn', 'Update in Steam');
+  go.type = 'button';
+  go.onclick = () => steamAction('downloads');
+  head.append(el('h2', 'store-h', `Updates available (${list.length})`), go);
+  const names = el('div', 'su-names');
+  names.append(...list.map((g) => el('span', 'tag', g.name)));
+  box.append(head, names);
+  return [box];
+}
+
+async function showStore() {
+  const run = ++storeRun;
+  storeEl.replaceChildren(el('p', 'store-msg', 'Loading the Steam store…'));
+  const r = await window.api.storeHome();
+  if (run !== storeRun) return;
+  if (!r.ok) { storeEl.replaceChildren(el('p', 'store-msg', `Could not reach the Steam store. ${r.error}`)); return; }
+  installedIds = new Set(r.data.installed);
+  storeEl.replaceChildren(...storeUpdates(r.data.updates), ...storeRow('Top sellers', r.data.topSellers), ...storeRow('Specials', r.data.specials), ...storeRow('New releases', r.data.newReleases));
+  storeEl.scrollTop = 0;
+}
+
+let storeTimer = 0;
+function storeTyped() {
+  clearTimeout(storeTimer);
+  storeTimer = setTimeout(async () => {
+    const term = $('search').value.trim();
+    if (!term) { showStore(); return; }
+    const run = ++storeRun;
+    const r = await window.api.storeSearch(term);
+    if (run !== storeRun) return;
+    if (!r.ok) { storeEl.replaceChildren(el('p', 'store-msg', r.error)); return; }
+    storeEl.replaceChildren(...(r.data.length ? storeRow(`Results for “${term}”`, r.data) : [el('p', 'store-msg', `Nothing found for “${term}”.`)]));
+    storeEl.scrollTop = 0;
+  }, 250);
+}
+
+// Steam's descriptions can contain HTML entities; this reads them as plain text
+const plainText = (s) => new DOMParser().parseFromString(s, 'text/html').body.textContent;
+
+async function openStoreItem(id) {
+  const body = $('si-body');
+  itemId = id;
+  body.replaceChildren(el('p', 'store-msg', 'Loading…'));
+  $('si-install').hidden = true;
+  itemDlg.returnValue = '';
+  itemDlg.showModal();
+  const r = await window.api.storeDetails(id);
+  if (itemId !== id) return;
+  if (!r.ok) { body.replaceChildren(el('p', 'store-msg', r.error)); return; }
+  const d = r.data;
+  const hero = el('img', 'si-hero');
+  hero.src = d.image;
+  hero.alt = '';
+  const price = d.comingSoon ? 'Coming soon' : d.free ? 'Free' : d.price || 'Not sold in your region';
+  const meta = el('div', 'si-meta');
+  meta.append(el('span', 'tag', installedIds.has(String(id)) ? 'Installed' : price));
+  if (d.discount) meta.append(el('span', 'tag warn', `-${d.discount}%`));
+  for (const g of d.genres.slice(0, 3)) meta.append(el('span', 'si-genre', g));
+  const shots = el('div', 'si-shots');
+  for (const s of d.screenshots) { const i = el('img'); i.src = s; i.alt = ''; i.loading = 'lazy'; shots.append(i); }
+  body.replaceChildren(hero, el('h2', '', d.name), meta, el('p', 'si-desc', plainText(d.description)),
+    el('p', 'hint-text', [d.developers.join(', '), d.released].filter(Boolean).join(' · ')), shots);
+  $('si-install').hidden = !d.free || installedIds.has(String(id));
+}
+$('si-open').onclick = () => steamAction('page', itemId);
+$('si-install').onclick = () => steamAction('install', itemId);
 
 // ---- updates
 let pendingUpdate = null;

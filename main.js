@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, net, screen } = require('electron');
 const importers = require('./importers');
 const updater = require('./updater');
+const store = require('./store');
 const { spawn, execFile } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
@@ -167,7 +168,7 @@ function createWindow() {
   win.webContents.on('before-input-event', (_e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') win.setFullScreen(!win.isFullScreen());
   });
-  win.on('focus', () => { if (startupDone) syncAzimuth(); });
+  win.on('focus', () => { if (startupDone) { syncAzimuth(); refreshSteamState(); } });
   win.on('close', (e) => {
     if (app.isQuitting) return;
     const gameRunning = running.size > 0; // quitting now would lose the session's play time
@@ -203,7 +204,7 @@ if (!app.requestSingleInstanceLock()) {
     if (loadSettings().discordId) setTimeout(discordConnect, 3000);
     if (app.isPackaged) fs.rm(path.join(process.resourcesPath, 'app.asar.new'), { force: true }, () => {}); // leftover from a failed update
     setTimeout(() => { if (loadSettings().autoUpdate !== false) checkForUpdate(); }, 8000);
-    win.webContents.once('did-finish-load', () => { setTimeout(() => { startupDone = true; syncAzimuth(); }, 1500); if (id) launchFromShortcut(id); });
+    win.webContents.once('did-finish-load', () => { setTimeout(() => { startupDone = true; syncAzimuth(); refreshSteamState(); }, 1500); if (id) launchFromShortcut(id); });
     app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
   });
   app.on('window-all-closed', () => { if (!loadSettings().closeToTray) app.quit(); });
@@ -290,7 +291,7 @@ function inspectGame(g) {
 ipcMain.handle('library:get', async () => {
   const games = loadLibrary();
   const info = await Promise.all(games.map(inspectGame));
-  return games.map((g, i) => ({ ...newGame({}), ...g, running: running.has(g.id), problem: info[i].problem, bgView: info[i].view }));
+  return games.map((g, i) => ({ ...newGame({}), ...g, running: running.has(g.id), problem: info[i].problem, bgView: info[i].view, updateNeeded: g.source === 'steam' && steamGames.some((s) => s.update && s.id === String(g.sourceId)) }));
 });
 
 ipcMain.handle('library:add', async () => {
@@ -1033,4 +1034,39 @@ ipcMain.handle('update:install', async () => {
   updater.applyAndRestart({ newFile: download, targetFile: target, exe: process.execPath });
   setTimeout(() => app.quit(), 200);
   return { ok: true };
+});
+
+// ---------------------------------------------------------------- store and Steam updates (see store.js)
+const region = () => app.getLocaleCountryCode() || 'US';
+const storeFetch = (u) => net.fetch(u);
+const storeCall = (fn) => fn().then((data) => ({ ok: true, data }), (err) => ({ ok: false, error: err.message }));
+
+// Read in the background and never on the way to drawing the library, so Steam can't slow startup
+let steamGames = [];
+let steamChecked = 0;
+async function refreshSteamState() {
+  if (Date.now() - steamChecked < 30000) return;
+  steamChecked = Date.now();
+  try {
+    const next = await importers.steamState();
+    const changed = JSON.stringify(next) !== JSON.stringify(steamGames);
+    steamGames = next;
+    if (changed) send('library:changed');
+  } catch {}
+}
+
+ipcMain.handle('store:home', () => storeCall(async () => {
+  steamChecked = 0;
+  await refreshSteamState();
+  return { ...(await store.home(region(), storeFetch)), updates: steamGames.filter((g) => g.update), installed: steamGames.map((g) => g.id) };
+}));
+ipcMain.handle('store:search', (_e, term) => storeCall(() => store.search(String(term), region(), storeFetch)));
+ipcMain.handle('store:details', (_e, id) => storeCall(() => store.details(Number(id), region(), storeFetch)));
+
+// Steam has no documented "update this game" command, so updates run from its Downloads page
+ipcMain.handle('store:steam', async (_e, action, id) => {
+  const appid = Number(id);
+  const urls = { page: `steam://store/${appid}`, install: `steam://install/${appid}`, downloads: 'steam://nav/downloads' };
+  if (!urls[action] || (action !== 'downloads' && !Number.isInteger(appid))) return { ok: false, error: 'Unknown Steam action' };
+  try { await shell.openExternal(urls[action]); return { ok: true }; } catch { return { ok: false, error: 'Steam could not be opened. Is it installed?' }; }
 });
