@@ -6,7 +6,8 @@
 
 /* ---------- richer feature card ---------- */
 #feature .bg { filter: blur(26px) saturate(1.2) brightness(.55); }
-#feature.hero .bg { filter: blur(2px) saturate(1.1) brightness(.62); inset: -6px; }
+#feature.hero .bg { filter: none; inset: 0; }
+#feature.hero .tint { background: linear-gradient(90deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.35) 55%, rgba(0,0,0,.1) 100%), radial-gradient(circle at 75% 25%, hsla(var(--hue), 70%, 55%, .35), transparent 60%), rgba(0,0,0,.38); }
 #feature .tint { background: linear-gradient(90deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.35) 55%, rgba(0,0,0,.1) 100%), radial-gradient(circle at 75% 25%, hsla(var(--hue), 70%, 55%, .35), transparent 60%); }
 #feature { gap: 3.5vw; }
 .detail { justify-content: center; gap: 0; }
@@ -32,44 +33,11 @@
 .sgdb-grid.icon img { aspect-ratio: 1; }
 
 /* ---------- motion ---------- */
-@keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
-@keyframes slideInR { from { opacity: 0; transform: translateX(70px) scale(.96); } to { opacity: 1; transform: none; } }
-@keyframes slideInL { from { opacity: 0; transform: translateX(-70px) scale(.96); } to { opacity: 1; transform: none; } }
-@keyframes bgIn { from { opacity: 0; transform: scale(1.08); } to { opacity: 1; transform: scale(1); } }
-@keyframes stripIn { from { opacity: 0; transform: translateY(40px); } to { opacity: 1; transform: none; } }
-@keyframes wedge { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes grow { from { width: 0; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.35) rotate(-8deg); } 100% { transform: scale(1); } }
-@keyframes dlgIn { from { opacity: 0; transform: translateY(24px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes dlgIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-body::before { animation: wedge .5s cubic-bezier(.2,.8,.2,1) both; }
-body::after { animation: wedge .5s cubic-bezier(.2,.8,.2,1) both reverse; }
-header > * { animation: fadeUp .35s cubic-bezier(.2,.8,.2,1) both; }
-header > *:nth-child(2) { animation-delay: .03s; } header > *:nth-child(3) { animation-delay: .06s; }
-header > *:nth-child(4) { animation-delay: .09s; } header > *:nth-child(5) { animation-delay: .12s; }
-footer > * { animation: fadeUp .35s .1s cubic-bezier(.2,.8,.2,1) both; }
-
-#stage .bg { animation: bgIn .9s cubic-bezier(.2,.8,.2,1) both; }
-#stage.anim-next .cover-frame, #stage.anim-in .cover-frame { animation: slideInR .55s cubic-bezier(.2,.8,.2,1) both; }
-#stage.anim-prev .cover-frame { animation: slideInL .55s cubic-bezier(.2,.8,.2,1) both; }
-#stage[class*="anim-"] .detail > * { animation: fadeUp .55s cubic-bezier(.2,.8,.2,1) both; }
-#stage[class*="anim-"] .detail > :nth-child(1) { animation-delay: .08s; }
-#stage[class*="anim-"] .detail > :nth-child(2) { animation-delay: .14s; }
-#stage[class*="anim-"] .detail > :nth-child(3) { animation-delay: .2s; }
-#stage[class*="anim-"] .detail > :nth-child(4) { animation-delay: .26s; }
-#stage[class*="anim-"] .detail > :nth-child(5) { animation-delay: .38s; }
-#stage[class*="anim-"] .detail > :nth-child(6) { animation-delay: .44s; }
-#stage[class*="anim-"] .stat { animation: fadeUp .5s both; }
-#stage[class*="anim-"] .stat:nth-child(1) { animation-delay: .24s; }
-#stage[class*="anim-"] .stat:nth-child(2) { animation-delay: .3s; }
-#stage[class*="anim-"] .stat:nth-child(3) { animation-delay: .36s; }
-#stage[class*="anim-"] .stat:nth-child(4) { animation-delay: .42s; }
-#stage[class*="anim-"] .stat:nth-child(5) { animation-delay: .48s; }
-#stage[class*="anim-"] .bar i { animation: grow .9s .5s cubic-bezier(.2,.8,.2,1) both; }
-#stage[class*="anim-"] .strip { animation: stripIn .55s cubic-bezier(.2,.8,.2,1) both; }
-#stage[class*="anim-"] .strip:nth-child(2) { animation-delay: .06s; }
-#stage[class*="anim-"] .strip:nth-child(3) { animation-delay: .12s; }
-#stage[class*="anim-"] .strip:nth-child(4) { animation-delay: .18s; }
+#stage.anim-in .track { animation: fadeIn .14s ease-out both; }
 
 .strip { transition: transform .25s cubic-bezier(.2,.8,.2,1), filter .25s; }
 .strip:hover { transform: translateY(-10px); filter: brightness(1.35); }
@@ -82,8 +50,7 @@ footer > * { animation: fadeUp .35s .1s cubic-bezier(.2,.8,.2,1) both; }
 .btn:active { transform: translateY(1px) scale(.97); }
 .btn.fav.pop { animation: pop .45s; }
 .dots i { transition: width .35s cubic-bezier(.2,.8,.2,1), background .35s; }
-dialog[open] { animation: dlgIn .3s cubic-bezier(.2,.8,.2,1); }
-dialog::backdrop { backdrop-filter: blur(3px); }
+dialog[open] { animation: dlgIn .14s ease-out; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 
 /* keep everything inside the card at ~800px tall windows */
@@ -99,20 +66,15 @@ dialog::backdrop { backdrop-filter: blur(3px); }
 /* conveyor: the whole card + strips slide as one unit; old and new sit side by side, never overlapping */
 @keyframes carInNext { from { transform: translateX(calc(100% + 60px)); } to { transform: none; } }
 @keyframes carInPrev { from { transform: translateX(calc(-100% - 60px)); } to { transform: none; } }
-@keyframes carOutNext { from { transform: none; } to { transform: translateX(calc(-100% - 60px)); } }
-@keyframes carOutPrev { from { transform: none; } to { transform: translateX(calc(100% + 60px)); } }
+@keyframes carOutNext { from { transform: var(--from, none); } to { transform: translateX(calc(-100% - 60px)); } }
+@keyframes carOutPrev { from { transform: var(--from, none); } to { transform: translateX(calc(100% + 60px)); } }
 #stage { position: relative; overflow-x: clip; }
 .track { flex: 1; min-width: 0; display: flex; gap: 14px; }
-#stage.anim-next .track:not(.leaving) { animation: carInNext .6s cubic-bezier(.3,.7,.2,1) both; }
-#stage.anim-prev .track:not(.leaving) { animation: carInPrev .6s cubic-bezier(.3,.7,.2,1) both; }
-#stage.anim-next *, #stage.anim-prev * { animation-delay: 0s !important; }
-#stage.anim-next .detail > *, #stage.anim-prev .detail > *, #stage.anim-next .stat, #stage.anim-prev .stat,
-#stage.anim-next .strip, #stage.anim-prev .strip, #stage.anim-next .cover-frame, #stage.anim-prev .cover-frame,
-#stage.anim-next #feature .bg, #stage.anim-prev #feature .bg, #stage.anim-next #feature, #stage.anim-prev #feature { animation: none !important; }
+#stage.anim-next .track:not(.leaving) { animation: carInNext .32s cubic-bezier(.25,.8,.25,1) both; }
+#stage.anim-prev .track:not(.leaving) { animation: carInPrev .32s cubic-bezier(.25,.8,.25,1) both; }
 #stage .leaving { position: absolute; inset: 0; margin: 0; pointer-events: none; }
-.leaving, .leaving * { animation: none; }
-.leaving.out-next { animation: carOutNext .6s cubic-bezier(.3,.7,.2,1) both !important; }
-.leaving.out-prev { animation: carOutPrev .6s cubic-bezier(.3,.7,.2,1) both !important; }
+.leaving.out-next { animation: carOutNext .32s cubic-bezier(.25,.8,.25,1) both; }
+.leaving.out-prev { animation: carOutPrev .32s cubic-bezier(.25,.8,.25,1) both; }
 
 /* ---------- themed scrollbars ---------- */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -130,7 +92,6 @@ dialog::backdrop { backdrop-filter: blur(3px); }
 .hint kbd.xb-a { background: #3cb44b; color: #fff; }
 .hint kbd.xb-x { background: #2f6fe0; color: #fff; }
 .hint kbd.xb-y { background: #e6b800; color: #000; }
-.hint { animation: fadeUp .35s both; }
 
 /* strips share the focus card's slant: every edge leans the same 20px */
 #feature { clip-path: polygon(0 0, 100% 0, calc(100% - 20px) 100%, 0 100%); }
@@ -190,14 +151,12 @@ body::before { width: min(26vw, 420px); height: min(14vh, 120px); }
 .strip .sin { transform: skewX(calc(var(--lean, 1.8) * -1deg)); }
 
 /* promote the sliding layers only while they animate */
-#stage[class*="anim-"] .track, #stage .leaving { will-change: transform; }
+#stage.anim-next .track, #stage.anim-prev .track { will-change: transform; }
 
-/* first draw and filter/sort changes: no long staggered intro, so the UI looks ready straight away */
-#stage.anim-in *, #stage.anim-in { animation-delay: 0s !important; animation-duration: .28s !important; }
 
 /* update button in the header */
 [hidden] { display: none !important; }
-.update-btn { background: var(--accent); border-color: var(--accent); animation: fadeUp .35s both; }
+.update-btn { background: var(--accent); border-color: var(--accent); }
 .update-btn:disabled { opacity: .8; cursor: default; }
 
 /* keep the pager on screen when the Update button is showing */

@@ -8,6 +8,7 @@ const initialGames = ipcRenderer.invoke('library:get');
 contextBridge.exposeInMainWorld('api', {
   getGames: inv('library:get'),
   initialGames: () => initialGames,
+  ready: () => ipcRenderer.send('app:ready'),
   addGame: inv('library:add'),
   addAzimuth: inv('library:addAzimuth'),
   updateGame: inv('library:update'),

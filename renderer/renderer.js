@@ -21,7 +21,7 @@ function toast(msg, isErr) {
   toast.timer = setTimeout(() => (t.style.display = 'none'), isErr ? 6000 : 3000);
 }
 
-const fileUrl = (p) => 'file:///' + p.replace(/\\/g, '/').replace(/#/g, '%23').replace(/'/g, '%27');
+const fileUrl = (p) => 'file:///' + p.replace(/%/g, '%25').replace(/\\/g, '/').replace(/#/g, '%23').replace(/'/g, '%27').replace(/\?/g, '%3F');
 const hue = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -42,6 +42,31 @@ function fmtLast(iso) {
   if (days === 1) return 'Yesterday';
   if (days < 30) return `${days} days ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+// Images are decoded ahead of time, so a card never appears with its art missing or changing fit.
+const artOf = (g) => g.bgView || g.background || g.cover;
+const faceOf = (g) => g.cover || g.logo;
+const warmed = new Map(); // url -> { img, done }; holding the Image keeps it decoded
+const portrait = new Map(); // url -> true when the art fills the 3:4 frame
+const isPortrait = (img) => Math.abs(img.naturalWidth / img.naturalHeight - 0.75) < 0.12;
+
+function warm(src) {
+  if (!src) return Promise.resolve();
+  const url = fileUrl(src);
+  if (warmed.has(url)) return warmed.get(url).done;
+  const img = new Image();
+  img.src = url;
+  const done = img.decode().then(() => { portrait.set(url, isPortrait(img)); }, () => {});
+  warmed.set(url, { img, done });
+  if (warmed.size > 40) warmed.delete(warmed.keys().next().value);
+  return done;
+}
+const warmGame = (g) => (g ? Promise.all([warm(artOf(g)), warm(faceOf(g)), warm(g.logo)]) : Promise.resolve());
+
+function warmNeighbours(list) {
+  if (list.length < 2) return;
+  for (const k of [1, -1, 2, 3, 4]) warmGame(list[(index + k + list.length) % list.length]);
 }
 
 function el(tag, cls, text) {
@@ -104,15 +129,14 @@ function render(anim) {
   let leaving = null;
   const oldTrack = stage.querySelector('.track:not(.leaving)');
   if ((anim === 'next' || anim === 'prev') && oldTrack) {
+    const at = getComputedStyle(oldTrack).transform; // continue from mid-slide when browsing quickly
     leaving = oldTrack.cloneNode(true);
+    leaving.style.setProperty('--from', at);
     leaving.classList.add('leaving', 'out-' + anim);
   }
   stage.className = anim ? 'anim-' + anim : '';
   stage.replaceChildren();
-  if (leaving) {
-    stage.append(leaving);
-    setTimeout(() => leaving.remove(), 500);
-  }
+  if (leaving) stage.append(leaving);
   if (!g) {
     const empty = el('div', 'empty', games.length ? 'No games match.' : 'No games yet.');
     if (!games.length) {
@@ -131,14 +155,23 @@ function render(anim) {
   const track = el('div', 'track');
   track.append(buildFeature(g, list), buildStrips(list));
   stage.append(track);
+  clearTimeout(render.warmTimer);
+  render.warmTimer = setTimeout(() => warmNeighbours(list), anim ? 340 : 0);
 }
+
+// when the slide ends, drop the outgoing copy and release the animation layers
+stage.addEventListener('animationend', (e) => {
+  if (!e.target.classList.contains('track')) return;
+  if (e.target.classList.contains('leaving')) e.target.remove();
+  else stage.className = '';
+});
 
 function buildFeature(g, list) {
   const f = el('div');
   f.id = 'feature';
   f.style.setProperty('--hue', hue(g.title));
 
-  const art = g.background || g.cover;
+  const art = artOf(g);
   if (art) {
     const bg = el('div', 'bg');
     bg.style.backgroundImage = `url('${fileUrl(art)}')`;
@@ -148,16 +181,17 @@ function buildFeature(g, list) {
   f.append(el('div', 'tint'));
 
   const frame = el('div', 'cover-frame' + (g.cover ? ' has-img' : ''));
-  const face = g.cover || g.logo;
+  const face = faceOf(g);
   if (face) {
     frame.classList.add('has-img');
-    const blur = el('img', 'blur');
-    blur.src = fileUrl(face);
+    const url = fileUrl(face);
     const img = el('img', 'main');
-    img.src = fileUrl(face);
+    img.src = url;
     // portrait art fills the frame; wide/square art is shown whole over a blurred copy of itself
-    img.onload = () => { if (Math.abs(img.naturalWidth / img.naturalHeight - 0.75) < 0.12) img.classList.add('fill'); };
-    frame.append(blur, img);
+    const backdrop = () => { const blur = el('img', 'blur'); blur.src = url; frame.prepend(blur); };
+    if (portrait.has(url)) { if (portrait.get(url)) img.classList.add('fill'); else backdrop(); }
+    else img.onload = () => { if (isPortrait(img)) img.classList.add('fill'); else backdrop(); };
+    frame.append(img);
   }
   frame.append(el('div', 'cf-title', g.title));
 
@@ -223,7 +257,7 @@ function buildStrips(list) {
     const b = el('button', 'strip');
     b.style.setProperty('--hue', hue(g.title));
     b.title = g.title;
-    const art = g.background || g.cover;
+    const art = artOf(g);
     if (art) {
       const sb = el('div', 'sbg');
       sb.style.backgroundImage = `url('${fileUrl(art)}')`;
@@ -232,28 +266,44 @@ function buildStrips(list) {
     const inner = el('div', 'sin');
     inner.append(el('div', 'snum', pad(i + 1)), el('div', 'sdot'), el('div', 'sname', g.title), el('div', 'sfav', g.favourite ? '★' : ''));
     b.append(inner);
-    b.onclick = () => select(i);
+    b.onclick = () => select(i, 'next');
     wrap.append(b);
   }
   return wrap;
 }
 
 // ---------------------------------------------------------------- actions
-async function refresh() {
-  games = await (first ? window.api.initialGames() : window.api.getGames());
-  render(first ? 'in' : undefined);
+let lastData = '';
+// force redraws after an optimistic change; otherwise identical data leaves the screen untouched
+async function refresh(force) {
+  const data = await (first ? window.api.initialGames() : window.api.getGames()).catch(() => []);
+  const json = JSON.stringify(data);
+  if (!first && force !== true && json === lastData) return;
+  lastData = json;
+  games = data;
+  // wait briefly for the art so the card is drawn complete; a slow drive can't hold it up
+  const list = visible();
+  current(list);
+  const onScreen = list.length ? [0, 1, 2, 3].slice(0, list.length).map((k) => list[(index + k) % list.length]) : [];
+  await Promise.race([Promise.all(onScreen.map(warmGame)), new Promise((r) => setTimeout(r, first ? 600 : 150))]);
+  render();
+  if (first) window.api.ready();
   first = false;
 }
 
 async function play_(g) {
+  g.running = true; // show it straight away; the refresh below corrects this if the launch fails
+  render();
   const r = await window.api.launch(g.id);
   if (r && !r.ok) toast(r.error, true);
-  refresh();
+  refresh(true);
 }
 
 async function toggleFav(g) {
-  await window.api.updateGame(g.id, { favourite: !g.favourite });
-  refresh();
+  g.favourite = !g.favourite;
+  render();
+  await window.api.updateGame(g.id, { favourite: g.favourite });
+  refresh(true);
 }
 
 async function importAzimuth() {
@@ -286,6 +336,7 @@ function openEdit(g) {
   for (const k of ART) $('n-' + k).textContent = base(g[k]);
   $('sgdb-results').replaceChildren();
   $('sgdb-msg').textContent = '';
+  dlg.returnValue = ''; // otherwise Esc reuses the last result and saves again
   dlg.showModal();
 }
 
@@ -380,7 +431,7 @@ async function renderPrereqs() {
 }
 
 $('open-settings').onclick = async () => {
-  const s = await window.api.getSettings();
+  const [s, ui, displays] = await Promise.all([window.api.getSettings(), window.api.updateInfo(), window.api.listDisplays()]);
   $('s-sgdb').value = s.sgdbKey || '';
   $('s-discord').value = s.discordId || '';
   $('s-tray').checked = !!s.closeToTray;
@@ -390,14 +441,14 @@ $('open-settings').onclick = async () => {
   $('s-after').value = s.afterLaunch || 'stay';
   $('s-repo').value = s.updateRepo || '';
   $('s-autoupdate').checked = s.autoUpdate !== false;
-  const ui = await window.api.updateInfo();
   $('s-version').textContent = `Installed version ${ui.version}` + (ui.packaged ? '' : ' (running from source)');
   $('s-update-install').hidden = !pendingUpdate;
   $('s-update-msg').textContent = pendingUpdate ? ` Version ${pendingUpdate.version} is available` : '';
   const sel = $('s-display');
   sel.replaceChildren(new Option('Primary monitor (default)', ''));
-  for (const d of await window.api.listDisplays()) sel.append(new Option(d.label, d.id));
+  for (const d of displays) sel.append(new Option(d.label, d.id));
   sel.value = [...sel.options].some((o) => o.value === s.display) ? s.display : '';
+  settingsDlg.returnValue = '';
   settingsDlg.showModal();
 };
 settingsDlg.addEventListener('close', async () => {
@@ -428,14 +479,20 @@ $('add-azimuth').onclick = importAzimuth;
 $('bigpicture').onclick = () => window.api.toggleFullscreen();
 $('prev').onclick = () => select(index - 1);
 $('next').onclick = () => select(index + 1);
-$('search').oninput = () => { index = 0; selectedId = null; render('in'); };
+$('search').oninput = () => { index = 0; selectedId = null; render(); };
 $('sort').onchange = () => render('in');
 document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => { tab = t.dataset.tab; index = 0; selectedId = null; render('in'); }));
 
-window.api.onExit(refresh);
+// Cancel is a plain button, so Enter in a text box presses Save rather than discarding the edits
+document.querySelectorAll('dialog button[value=cancel]').forEach((b) => {
+  b.type = 'button';
+  b.onclick = () => b.closest('dialog').close('cancel');
+});
+
+window.api.onExit(() => refresh(true));
 // artwork downloads can fire many change events at once; redraw once
 let changedTimer = 0;
-window.api.onChanged(() => { clearTimeout(changedTimer); changedTimer = setTimeout(refresh, 300); });
+window.api.onChanged(() => { clearTimeout(changedTimer); changedTimer = setTimeout(() => refresh(), 300); });
 window.api.onFailed((id, msg) => {
   const g = games.find((x) => x.id === id);
   toast(`${g ? g.title : 'Game'}: ${msg}`, true);
@@ -486,14 +543,18 @@ $('imp-go').onclick = async () => {
 };
 document.querySelectorAll('[data-import]').forEach((b) => (b.onclick = () => openImporter(b.dataset.import)));
 
+let keyLock = 0;
 document.addEventListener('keydown', (e) => {
   setInput('kbd');
   if (modalOpen() || e.target.matches('input, select, textarea') || e.ctrlKey || e.altKey) return;
   const g = visible()[index];
   const k = e.key.toLowerCase();
-  if (k === 'arrowleft') select(index - 1);
-  else if (k === 'arrowright') select(index + 1);
-  else if (k === 'enter' && g && !g.running) play_(g);
+  if (k === 'arrowleft' || k === 'arrowright') {
+    const now = Date.now();
+    if (e.repeat && now < keyLock) return; // holding a key steps at a steady pace
+    keyLock = now + 170;
+    select(index + (k === 'arrowleft' ? -1 : 1));
+  } else if (k === 'enter' && g && !g.running && !e.target.closest('button, a')) play_(g); // Enter on a focused button presses that button
   else if (k === 'e' && g) openEdit(g);
   else if (k === 'f' && g) toggleFav(g);
 });
@@ -539,7 +600,7 @@ stage.addEventListener('wheel', (e) => {
   if (Math.abs(wheelAcc) < 40 || now < wheelLock) return;
   select(index + (wheelAcc > 0 ? 1 : -1), wheelAcc > 0 ? 'next' : 'prev');
   wheelAcc = 0;
-  wheelLock = now + 420;
+  wheelLock = now + 240;
 }, { passive: false });
 
 // ---------------------------------------------------------------- gamepad (A play, X details, Y favourite, LB/RB browse)
@@ -573,8 +634,6 @@ function startPadLoop() { if (!padLoop) { padLoop = true; requestAnimationFrame(
 window.addEventListener('gamepadconnected', startPadLoop);
 if ([...(navigator.getGamepads() || [])].some(Boolean)) startPadLoop();
 
-refresh();
-
 // ---- import dropdown
 {
   const menu = $('import-menu'), btn = $('import-btn');
@@ -585,16 +644,11 @@ refresh();
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
 }
 
-// keep the strip text parallel to the strip edges (edges lean 20px over the strip's height)
-function updateLean() {
-  const s = document.querySelector('.strip');
-  if (!s) return;
-  const h = s.getBoundingClientRect().height;
+// keep the strip text parallel to the strip edges (edges lean 20px over the strip's height, which is the stage's)
+new ResizeObserver(() => {
+  const h = stage.clientHeight;
   if (h > 0) document.documentElement.style.setProperty('--lean', (Math.atan(20 / h) * 180 / Math.PI).toFixed(3));
-}
-new ResizeObserver(updateLean).observe(stage);
-new MutationObserver(updateLean).observe(stage, { childList: true });
-updateLean();
+}).observe(stage);
 
 
 // ---- updates
@@ -631,3 +685,5 @@ $('s-update-check').onclick = async () => {
   msg.style.color = r.available ? '#5ee08a' : '#8d92a6';
   msg.textContent = r.available ? ` Version ${r.version} is available` : ` You're up to date (${r.current})`;
 };
+
+refresh();

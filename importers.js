@@ -84,7 +84,7 @@ async function scanEpic() {
       ? `com.epicgames.launcher://apps/${m.CatalogNamespace}%3A${m.CatalogItemId}%3A${m.AppName}?action=launch&silent=true` : '';
     games.push({
       key: `epic:${m.AppName}`, source: 'epic', sourceId: m.AppName, title: m.DisplayName, tag: 'Epic Games',
-      launchUri: uri, watchFolder: m.InstallLocation, exe: uri ? exe : exe, cover: '', background: '', logo: '',
+      launchUri: uri, watchFolder: m.InstallLocation, exe, cover: '', background: '', logo: '',
       detail: m.InstallLocation,
     });
   }

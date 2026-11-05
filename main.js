@@ -3,6 +3,7 @@ const importers = require('./importers');
 const updater = require('./updater');
 const { spawn, execFile } = require('child_process');
 const os = require('os');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -15,27 +16,47 @@ const running = new Map(); // game id -> child process
 let win = null;
 let tray = null;
 let discord = null;
+let quitAfterGames = false; // window was closed during a game: quit once play time is recorded
 
 // ---------------------------------------------------------------- persistence
+// write to a temp file then rename, so a crash mid-write can never leave a half-written file
+function writeAtomic(file, text) {
+  fs.writeFileSync(file + '.tmp', text);
+  fs.renameSync(file + '.tmp', file);
+}
+
+// both files are kept in memory; callers get their own copy so they can edit it before saving
+let libraryCache = null;
 function loadLibrary() {
-  try {
-    return JSON.parse(fs.readFileSync(libraryFile(), 'utf8'));
-  } catch {
-    // fall back to the automatic backup if the main file is corrupt
-    try { return JSON.parse(fs.readFileSync(libraryFile() + '.bak', 'utf8')); } catch { return []; }
+  if (!libraryCache) {
+    try {
+      libraryCache = JSON.parse(fs.readFileSync(libraryFile(), 'utf8'));
+    } catch {
+      // fall back to the automatic backup if the main file is corrupt
+      try { libraryCache = JSON.parse(fs.readFileSync(libraryFile() + '.bak', 'utf8')); } catch { libraryCache = []; }
+    }
   }
+  return structuredClone(libraryCache);
 }
 
 function saveLibrary(games) {
   try { if (fs.existsSync(libraryFile())) fs.copyFileSync(libraryFile(), libraryFile() + '.bak'); } catch {}
-  fs.writeFileSync(libraryFile(), JSON.stringify(games, null, 2));
+  writeAtomic(libraryFile(), JSON.stringify(games, null, 2));
+  libraryCache = structuredClone(games);
 }
 
 const defaultSettings = { sgdbKey: '', discordId: '', closeToTray: false, azimuthPath: '', display: '', launchAtStartup: false, startMinimised: false, startFullscreen: false, afterLaunch: 'stay', updateRepo: '', autoUpdate: true };
+let settingsCache = null;
 function loadSettings() {
-  try { return { ...defaultSettings, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch { return { ...defaultSettings }; }
+  if (!settingsCache) {
+    try { settingsCache = { ...defaultSettings, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch { settingsCache = { ...defaultSettings }; }
+  }
+  return { ...settingsCache };
 }
-function saveSettings(s) { fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2)); }
+function saveSettings(s) {
+  writeAtomic(settingsFile(), JSON.stringify(s, null, 2));
+  settingsCache = { ...s };
+}
 
 function newGame(fields) {
   return {
@@ -51,6 +72,7 @@ function newGame(fields) {
 // ---------------------------------------------------------------- window / tray
 function showWindow() {
   if (!win) return createWindow();
+  quitAfterGames = false;
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
@@ -59,7 +81,7 @@ function showWindow() {
 function createTray() {
   if (tray) return;
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png')).resize({ width: 32, height: 32 }));
-  tray.setToolTip('Game Launcher');
+  tray.setToolTip('Kinetic');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open launcher', click: showWindow },
     { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
@@ -92,25 +114,57 @@ function moveToDisplay() {
 // launched by Windows at login with 'start minimised' on
 function startHidden() { return process.argv.includes('--startup') && !!loadSettings().startMinimised; }
 
+// The window opens only once the page has painted AND the library is drawn with its art decoded,
+// so the first thing on screen is the finished UI.
+let markRendered = () => {};
+ipcMain.on('app:ready', () => markRendered());
+
 function createWindow() {
+  const hidden = startHidden();
   win = new BrowserWindow({
     ...startBounds(), minWidth: 900, minHeight: 560,
     backgroundColor: '#07080f',
-    show: !startHidden(),
+    show: false,
+    fullscreen: !hidden && !!loadSettings().startFullscreen,
     icon: path.join(__dirname, 'assets', 'icon.png'),
     autoHideMenuBar: true,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, spellcheck: false },
   });
+  const w = win;
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  if (startHidden()) createTray();
-  else if (loadSettings().startFullscreen) win.once('ready-to-show', () => win && win.setFullScreen(true));
+  if (hidden) createTray();
+  else {
+    // A hidden window doesn't present new frames, so showing it would flash its last stale one.
+    // Instead it is shown fully transparent, and made opaque once real frames have been painted.
+    let painted = false, rendered = false, revealed = false;
+    const opaque = () => { if (!w.isDestroyed()) w.setOpacity(1); };
+    const reveal = () => {
+      if (revealed || w.isDestroyed()) return;
+      revealed = true;
+      w.setOpacity(0);
+      w.show();
+      // the frames reach the screen a little after requestAnimationFrame reports them
+      const settle = () => setTimeout(opaque, 80);
+      w.webContents.executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))').then(settle, settle);
+      setTimeout(opaque, 500);
+    };
+    w.once('ready-to-show', () => { painted = true; if (rendered) reveal(); });
+    markRendered = () => { rendered = true; if (painted) reveal(); };
+    setTimeout(reveal, 2000); // never stay invisible if the page has a problem
+  }
+  // a file dropped on the window must not replace the app, and links never open inside it
+  win.webContents.on('will-navigate', (e) => e.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('before-input-event', (_e, input) => {
     if (input.type === 'keyDown' && input.key === 'F11') win.setFullScreen(!win.isFullScreen());
   });
-  win.on('focus', () => { syncAzimuth(); });
+  win.on('focus', () => { if (startupDone) syncAzimuth(); });
   win.on('close', (e) => {
-    if (!app.isQuitting && loadSettings().closeToTray) {
+    if (app.isQuitting) return;
+    const gameRunning = running.size > 0; // quitting now would lose the session's play time
+    if (loadSettings().closeToTray || gameRunning) {
       e.preventDefault();
+      if (gameRunning && !loadSettings().closeToTray) quitAfterGames = true;
       createTray();
       win.hide();
     }
@@ -131,7 +185,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', (_e, argv) => {
     const id = launchArg(argv);
-    if (id) launchGame(id); else showWindow();
+    if (id) launchFromShortcut(id); else showWindow();
   });
   app.whenReady().then(() => {
     const id = launchArg(process.argv);
@@ -139,7 +193,7 @@ if (!app.requestSingleInstanceLock()) {
     if (loadSettings().discordId) setTimeout(discordConnect, 3000);
     if (app.isPackaged) fs.rm(path.join(process.resourcesPath, 'app.asar.new'), { force: true }, () => {}); // leftover from a failed update
     setTimeout(() => { if (loadSettings().autoUpdate !== false) checkForUpdate(); }, 8000);
-    win.webContents.once('did-finish-load', () => { setTimeout(syncAzimuth, 1500); if (id) launchGame(id); });
+    win.webContents.once('did-finish-load', () => { setTimeout(() => { startupDone = true; syncAzimuth(); }, 1500); if (id) launchFromShortcut(id); });
     app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
   });
   app.on('window-all-closed', () => { if (!loadSettings().closeToTray) app.quit(); });
@@ -170,10 +224,63 @@ async function problemForAsync(g) {
   return root(g.exe) && !(await pathExists(root(g.exe) + '\\')) ? `Drive ${root(g.exe)} is not connected` : 'Game file not found';
 }
 
+// Backgrounds can be 5 MB 4K images. The UI shows a 1600px copy, which decodes far faster and looks the
+// same behind the card. Copies are made in the background and keyed by path, date and size.
+const thumbDir = () => path.join(userData(), 'thumbs');
+const thumbQueue = new Map();
+const thumbFailed = new Set();
+let thumbTimer = null;
+
+async function artView(src) {
+  if (!src) return '';
+  try {
+    const st = await fs.promises.stat(src);
+    const file = path.join(thumbDir(), crypto.createHash('sha1').update(`${src}|${st.mtimeMs}|${st.size}`).digest('hex') + '.jpg');
+    if (await pathExists(file)) return file;
+    if (!thumbFailed.has(src)) {
+      thumbQueue.set(src, file);
+      if (!thumbTimer) thumbTimer = setTimeout(makeThumbs, 2500);
+    }
+  } catch {}
+  return '';
+}
+
+async function makeThumbs() {
+  let made = 0;
+  await fs.promises.mkdir(thumbDir(), { recursive: true });
+  for (const [src, file] of [...thumbQueue]) {
+    thumbQueue.delete(src);
+    try {
+      const img = nativeImage.createFromPath(src);
+      if (img.isEmpty()) { thumbFailed.add(src); continue; } // a format Electron can't read here, e.g. webp
+      const small = img.getSize().width > 1600 ? img.resize({ width: 1600, quality: 'good' }) : img;
+      await fs.promises.writeFile(file, small.toJPEG(86));
+      made++;
+    } catch { thumbFailed.add(src); }
+    await sleep(30);
+  }
+  thumbTimer = null;
+  if (made) send('library:changed');
+}
+
+// A sleeping or disconnected drive can take seconds to answer. The library never waits for one:
+// after 300ms it uses the last known answer and redraws when the real one arrives.
+const inspected = new Map();
+function inspectGame(g) {
+  let late = false;
+  const job = Promise.all([problemForAsync(g), artView(g.background)]).then(([problem, view]) => {
+    const prev = inspected.get(g.id);
+    inspected.set(g.id, { problem, view });
+    if (late && (!prev || prev.problem !== problem || prev.view !== view)) send('library:changed');
+    return { problem, view };
+  });
+  return Promise.race([job, sleep(300).then(() => { late = true; return inspected.get(g.id) || { problem: '', view: '' }; })]);
+}
+
 ipcMain.handle('library:get', async () => {
   const games = loadLibrary();
-  const problems = await Promise.all(games.map(problemForAsync)); // checked in parallel, off the main thread
-  return games.map((g, i) => ({ ...newGame({}), ...g, running: running.has(g.id), problem: problems[i] }));
+  const info = await Promise.all(games.map(inspectGame));
+  return games.map((g, i) => ({ ...newGame({}), ...g, running: running.has(g.id), problem: info[i].problem, bgView: info[i].view }));
 });
 
 ipcMain.handle('library:add', async () => {
@@ -232,6 +339,7 @@ function importAzimuth(azimuth) {
 
 // Pick up games added in Azimuth itself whenever the launcher regains focus.
 let lastIniMtime = 0;
+let startupDone = false; // the first focus event arrives mid-startup, when the sync would only compete with loading
 function syncAzimuth() {
   try {
     const az = findAzimuth();
@@ -336,9 +444,10 @@ function discordConnect() {
   if (discord) return Promise.resolve(true);
   if (discordPending) return discordPending;
   discordPending = (async () => {
+    let c = null;
     try {
       const { Client } = require('@xhayper/discord-rpc');
-      const c = new Client({ clientId: id });
+      c = new Client({ clientId: id });
       c.on('disconnected', () => { discord = null; dlog('Disconnected from Discord'); });
       await Promise.race([c.login(), new Promise((_, rej) => setTimeout(() => rej(new Error('Timed out — is the Discord desktop app open?')), 8000))]);
       discord = c;
@@ -347,6 +456,7 @@ function discordConnect() {
       return true;
     } catch (err) {
       discord = null;
+      try { if (c) c.destroy(); } catch {}
       dlog('Connection failed: ' + (err && err.message ? err.message : err));
       return false;
     } finally { discordPending = null; }
@@ -437,18 +547,18 @@ function endSession(id, started, code, err, hint, countPlay = true, endTime = Da
   else if (countPlay && secs < 6 && code) send('game:failed', id, `Exited after ${secs}s with code ${code}.${hint ? ' ' + hint : ''}`);
   const gg = loadLibrary().find((x) => x.id === id);
   if (gg && gg.postExit) runCommand(gg.postExit, false);
+  send('game:exited', id);
+  if (quitAfterGames && !running.size) { app.isQuitting = true; app.quit(); return; }
   const mode = loadSettings().afterLaunch;
   if (!running.size && mode && mode !== 'stay') showWindow();
-  send('game:exited', id);
 }
 
 // Steam / Epic games start through their own launcher, so we open the launcher's URI, wait for a process
 // to appear in the game's folder, and treat the game as running until that folder has no processes left.
 async function launchViaUri(g) {
   const id = g.id;
-  if (g.saveDir && fs.existsSync(g.saveDir)) { try { backupSaves(g); } catch {} }
+  if (g.saveDir && fs.existsSync(g.saveDir)) { try { await backupSaves(g); } catch {} }
   if (g.preLaunch) await runCommand(g.preLaunch, true);
-  running.set(id, {});
   discordGame = g;
   discordConnect().then((ok) => { if (ok && running.has(id)) discordActivity(g); });
   try {
@@ -478,32 +588,66 @@ async function launchViaUri(g) {
   return { ok: true };
 }
 
+const splitArgs = (str) => ((str || '').match(/(?:[^\s"]+|"[^"]*")+/g) || []).map((a) => a.replace(/^"|"$/g, ''));
+
+// The game is marked running straight away, so a second press during a slow pre-launch step can't start it twice
 async function launchGame(id) {
   const g = loadLibrary().find((x) => x.id === id);
   if (!g) return { ok: false, error: 'Game not found' };
   if (running.has(id)) return { ok: false, error: 'Already running' };
   const problem = problemFor(g);
   if (problem) return { ok: false, error: problem };
-  if (g.launchUri) return launchViaUri(g);
+  running.set(id, {});
+  try {
+    const r = await (g.launchUri ? launchViaUri(g) : launchExe(g));
+    if (!r.ok) running.delete(id);
+    return r;
+  } catch (err) {
+    running.delete(id);
+    return { ok: false, error: 'Could not start: ' + err.message };
+  }
+}
 
-  const args = g.args ? g.args.match(/(?:[^\s"]+|"[^"]*")+/g).map((a) => a.replace(/^"|"$/g, '')) : [];
+// from a desktop or Steam shortcut there is no Play button to report back to
+async function launchFromShortcut(id) {
+  const r = await launchGame(id);
+  if (!r.ok) { showWindow(); send('game:failed', id, r.error); }
+  send('library:changed');
+}
+
+async function launchExe(g) {
+  const id = g.id;
+  const args = splitArgs(g.args);
   if (g.azimuth) {
     try { selectAzimuthTitle(g.azimuth, g.titleId, g.displayMode); } catch (err) { return { ok: false, error: 'Could not update azimuth.ini: ' + err.message }; }
     args.unshift('--skip-launcher');
   } else if (g.displayMode === 'fullscreen' && !args.includes('-fullscreen')) args.push('-fullscreen');
   else if (g.displayMode === 'windowed' && !args.includes('-windowed')) args.push('-windowed');
-  const cwd = g.cwd && fs.existsSync(g.cwd) ? g.cwd : path.dirname(g.exe);
-  if (g.saveDir && fs.existsSync(g.saveDir)) { try { backupSaves(g); } catch {} }
+
+  // a .lnk can't be started directly, so run what it points to
+  let exe = g.exe, linkCwd = '';
+  if (/\.lnk$/i.test(exe)) {
+    const link = shell.readShortcutLink(exe);
+    exe = link.target;
+    linkCwd = link.cwd || '';
+    args.unshift(...splitArgs(link.args));
+  }
+  const cwd = [g.cwd, linkCwd].find((d) => d && fs.existsSync(d)) || path.dirname(exe);
+  if (g.saveDir && fs.existsSync(g.saveDir)) { try { await backupSaves(g); } catch {} }
 
   const env = { ...process.env, ...parseEnv(g.env) };
   if (g.preLaunch) await runCommand(g.preLaunch, true);
   let child;
   if (g.admin) {
     const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
-    const cmd = `Start-Process -FilePath ${q(g.exe)} ${args.length ? `-ArgumentList ${q(args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' '))}` : ''} -WorkingDirectory ${q(cwd)} -Verb RunAs -Wait`;
+    const cmd = `Start-Process -FilePath ${q(exe)} ${args.length ? `-ArgumentList ${q(args.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' '))}` : ''} -WorkingDirectory ${q(cwd)} -Verb RunAs -Wait`;
     child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', cmd], { env, stdio: 'ignore', windowsHide: true });
+  } else if (/\.(bat|cmd)$/i.test(exe)) {
+    // Node refuses to spawn batch files directly; they have to go through cmd.exe
+    const line = [`"${exe}"`, ...args.map((a) => (/[\s&^|<>()]/.test(a) ? `"${a}"` : a))].join(' ');
+    child = spawn('cmd.exe', ['/d', '/s', '/c', `"${line}"`], { cwd, env, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true });
   } else {
-    child = spawn(g.exe, args, { cwd, env, detached: false, stdio: 'ignore' });
+    child = spawn(exe, args, { cwd, env, detached: false, stdio: 'ignore' });
   }
   const started = Date.now();
   running.set(id, child);
@@ -518,7 +662,7 @@ async function launchGame(id) {
   const finish = (code, err, endTime) => {
     if (done) return;
     done = true;
-    endSession(id, started, code, err, "If it is an Azimuth game, check Azimuth's own log.", true, endTime);
+    endSession(id, started, code, err, "If it is an Azimuth game, check Azimuth's own log.", !err, endTime);
   };
   // Azimuth may hand the game to another process and exit, so for Azimuth titles keep the game "running"
   // (play time, Discord status) while anything is still running from the title's folder or azimuth.exe itself.
@@ -624,7 +768,7 @@ ipcMain.handle('game:steam', async (_e, id) => {
     const file = path.join(dir, 'shortcuts.vdf');
     let buf = fs.existsSync(file) ? fs.readFileSync(file) : Buffer.concat([Buffer.from('\0shortcuts\0', 'latin1'), Buffer.from([8, 8])]);
     const text = buf.toString('latin1');
-    if (text.includes(`AppName\0${g.title}\0`) && text.includes(`--launch=${g.id}`)) continue; // already added
+    if (text.includes(`--launch=${g.id}`)) continue; // already added
     if (fs.existsSync(file)) fs.copyFileSync(file, file + '.launcher-backup');
     const idx = Math.max(-1, ...[...text.matchAll(/\0(\d+)\0\x02appid\0/g)].map((m) => +m[1])) + 1;
     buf = Buffer.concat([buf.subarray(0, buf.length - 2), vdfEntry(idx, g), Buffer.from([8, 8])]);
@@ -636,18 +780,18 @@ ipcMain.handle('game:steam', async (_e, id) => {
 // ---------------------------------------------------------------- saves
 const backupRoot = (g) => path.join(userData(), 'save-backups', g.id);
 
-function backupSaves(g) {
-  if (!g.saveDir || !fs.existsSync(g.saveDir)) throw new Error('Save folder not set or missing');
+async function backupSaves(g) {
+  if (!g || !g.saveDir || !fs.existsSync(g.saveDir)) throw new Error('Save folder not set or missing');
   const dest = path.join(backupRoot(g), new Date().toISOString().replace(/[:.]/g, '-'));
-  fs.cpSync(g.saveDir, dest, { recursive: true });
-  const all = fs.readdirSync(backupRoot(g)).sort();
-  for (const old of all.slice(0, Math.max(0, all.length - 10))) fs.rmSync(path.join(backupRoot(g), old), { recursive: true, force: true });
+  await fs.promises.cp(g.saveDir, dest, { recursive: true });
+  const all = (await fs.promises.readdir(backupRoot(g))).sort();
+  for (const old of all.slice(0, Math.max(0, all.length - 10))) await fs.promises.rm(path.join(backupRoot(g), old), { recursive: true, force: true });
   return dest;
 }
 
-ipcMain.handle('saves:backup', (_e, id) => {
+ipcMain.handle('saves:backup', async (_e, id) => {
   const g = loadLibrary().find((x) => x.id === id);
-  try { return { ok: true, path: backupSaves(g) }; } catch (err) { return { ok: false, error: err.message }; }
+  try { return { ok: true, path: await backupSaves(g) }; } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('saves:open', (_e, id) => {
   const g = loadLibrary().find((x) => x.id === id);
@@ -692,8 +836,9 @@ ipcMain.handle('sgdb:download', async (_e, url, id, kind) => {
 // ---------------------------------------------------------------- settings / prerequisites / data
 ipcMain.handle('settings:get', () => loadSettings());
 ipcMain.handle('settings:set', (_e, patch) => {
-  const s = { ...loadSettings(), ...patch };
-  const moved = patch.display !== undefined && patch.display !== loadSettings().display;
+  const old = loadSettings();
+  const s = { ...old, ...patch };
+  const moved = patch.display !== undefined && patch.display !== old.display;
   saveSettings(s);
   if (moved) moveToDisplay();
   if (patch.launchAtStartup !== undefined || patch.startMinimised !== undefined) {
@@ -703,8 +848,8 @@ ipcMain.handle('settings:set', (_e, patch) => {
     });
   }
   if (s.closeToTray) createTray();
-  else if (tray) { tray.destroy(); tray = null; }
-  if (patch.discordId !== undefined) { if (discord) { try { discord.destroy(); } catch {} discord = null; } if (s.discordId) discordConnect(); }
+  else if (tray && !running.size) { tray.destroy(); tray = null; }
+  if (patch.discordId !== undefined && patch.discordId !== old.discordId) { if (discord) { try { discord.destroy(); } catch {} discord = null; } if (s.discordId) discordConnect(); }
   return s;
 });
 
@@ -738,7 +883,7 @@ ipcMain.handle('data:backup', () => {
   const dir = path.join(userData(), 'library-backups');
   fs.mkdirSync(dir, { recursive: true });
   const dest = path.join(dir, `library-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-  fs.copyFileSync(libraryFile(), dest);
+  fs.writeFileSync(dest, JSON.stringify(loadLibrary(), null, 2));
   return dest;
 });
 ipcMain.handle('data:open', () => shell.openPath(userData()));
