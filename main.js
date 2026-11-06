@@ -1004,7 +1004,7 @@ ipcMain.handle('import:add', async (_e, platform, keys) => {
 let updateInfo = null;
 let updating = false;
 const updateFetch = (u, o) => net.fetch(u, o);
-const updateRepo = () => loadSettings().updateRepo || '';
+const updateRepo = () => loadSettings().updateRepo || 'zZero111/Kinetic';
 
 async function checkForUpdate() {
   try {
@@ -1415,13 +1415,18 @@ ipcMain.handle('store:buy', (_e, id, name, pageUrl) => {
   buyView.webContents.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); closeBuyView(); }
   });
+  // the cart and payment steps can change without a full page load
+  buyView.webContents.on('did-navigate-in-page', (_e, url) => {
+    const c = buyView && buyView.webContents;
+    if (c && BUY_STEPS.test(url) && isSteamPage(c)) for (const ms of [300, 1200]) setTimeout(() => { if (!c.isDestroyed()) selectBuyButton(c); }, ms);
+  });
   buyView.webContents.on('did-finish-load', () => {
     keepPadFocus();
     const c = buyView && buyView.webContents;
     if (!c || !isSteamPage(c)) { buyReady = true; return; }
     c.insertCSS('[data-kinetic-focus] { outline: 3px solid #fff !important; outline-offset: 2px !important; }');
     // the page can finish drawing after it loads, so this tries again briefly
-    if (!/\/app\/\d+/.test(c.getURL())) { buyReady = true; return; }
+    if (!BUY_STEPS.test(c.getURL())) { buyReady = true; return; }
     for (const ms of [0, 800, 2000]) {
       setTimeout(async () => {
         if (c.isDestroyed()) return;
@@ -1499,12 +1504,18 @@ const BUY_NAV = `(dir) => {
   }
   return tryAll(ranked.sort((x, y) => x.sum - y.sum).map((x) => x.e));
 }`;
-// Selects the first purchase button on a game's page. Steam's page only marks it by class and label.
+// Selects, and never presses, the next purchase step: Add to Cart on a game's page, then the main button on the
+// cart and payment pages. Those pages have no stable class names, so buttons are matched by their label.
 const BUY_START = `(() => {
   if (document.querySelector('[data-kinetic-focus]')) return 'already';
   const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
   const list = [...document.querySelectorAll('.game_area_purchase_game .btn_addtocart a, .game_purchase_action .btn_addtocart a, .btn_addtocart a')].filter(shown);
-  const e = list[0] || [...document.querySelectorAll('#game_area_purchase a[href], #game_area_purchase button')].filter(shown).find((x) => /add to cart|buy|purchase/i.test(x.textContent));
+  const onGame = /\/app\/\d+/.test(location.pathname);
+  const buttons = [...document.querySelectorAll('button, a[href], [role=button], input[type=submit]')].filter((x) => shown(x) && (x.textContent || x.value || '').trim().length < 40);
+  const label = (re) => buttons.find((x) => re.test((x.textContent || x.value || '').trim()));
+  const e = onGame
+    ? list[0] || [...document.querySelectorAll('#game_area_purchase a[href], #game_area_purchase button')].filter(shown).find((x) => /add to cart|buy|purchase/i.test(x.textContent))
+    : label(/^purchase for myself/i) || label(/^continue to payment/i) || label(/^purchase$/i) || label(/^continue$/i);
   if (!e) return 'none';
   e.focus({ preventScroll: true });
   e.setAttribute('data-kinetic-focus', '');
@@ -1515,6 +1526,7 @@ const selectBuyButton = (c) => c.executeJavaScriptInIsolatedWorld(999, [{ code: 
 // focus can be lost while Kinetic holds it, so the marked control is focused again before it is pressed
 const refocusMarked = (c) => c.executeJavaScriptInIsolatedWorld(999, [{ code: `document.querySelector('[data-kinetic-focus]')?.focus({ preventScroll: true })` }]).catch(() => {});
 
+const BUY_STEPS = /\/app\/\d+|\/cart|\/checkout|checkout\.steampowered\.com/;
 const isSteamPage = (c) => { try { return /(^|\.)(steampowered|steamcommunity)\.com$/.test(new URL(c.getURL()).hostname); } catch { return false; } };
 const ARROWS = { up: 'Up', down: 'Down', left: 'Left', right: 'Right' };
 

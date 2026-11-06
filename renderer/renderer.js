@@ -820,7 +820,7 @@ function toggleFilters() {
 function padHints() {
   const box = $('pad-hints');
   const root = !buying && !osk && inputMode !== 'kbd' && navRoot();
-  const text = !root ? '' : openDialog() ? 'A select · B back · Right stick scroll' : tab === 'store' ? 'A select · B back · X filters · Y search · LB / RB featured · LT / RT tabs · View downloads' : 'A select · B back · LT / RT tabs · View downloads';
+  const text = !root ? '' : itemDlg.open && document.querySelector('.si-stage video') ? 'A select · B back · X sound · Y play / pause' : openDialog() ? 'A select · B back · Right stick scroll' : tab === 'store' ? 'A select · B back · X filters · Y search · LB / RB featured · LT / RT tabs · View downloads' : 'A select · B back · LT / RT tabs · View downloads';
   if (text === padHints.last) return; // this runs 60 times a second, so it only touches the page when something changed
   padHints.last = text;
   box.hidden = !root;
@@ -881,8 +881,15 @@ function pollPad() {
     once('lt', () => { if (!openDialog()) changeTab(-1); });
     once('rt', () => { if (!openDialog()) changeTab(1); });
     once('view', () => { zone = zone === 'jobs' ? null : !$('jobs').hidden ? 'jobs' : zone; });
-    once('x', () => { if (!openDialog() && tab === 'store') toggleFilters(); });
-    once('y', () => { if (!openDialog() && tab === 'store') { $('search').focus(); openKeyboard({ input: $('search') }); } });
+    const trailer = () => (itemDlg.open ? document.querySelector('.si-stage video') : null);
+    once('x', () => {
+      const v = trailer();
+      if (v) { v.muted = !v.muted; toast(v.muted ? 'Sound off' : 'Sound on'); } else if (!openDialog() && tab === 'store') toggleFilters();
+    });
+    once('y', () => {
+      const v = trailer();
+      if (v) { if (v.paused) v.play(); else v.pause(); } else if (!openDialog() && tab === 'store') { $('search').focus(); openKeyboard({ input: $('search') }); }
+    });
     once('lb', () => { if (!openDialog() && tab === 'store') stepHero(-1); });
     once('rb', () => { if (!openDialog() && tab === 'store') stepHero(1); });
     if (st.scroll) scrollArea(st.scroll * 22);
