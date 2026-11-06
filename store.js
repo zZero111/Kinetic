@@ -52,7 +52,9 @@ async function home(cc, fetchFn) {
   if (homeCache && homeCache.cc === cc && Date.now() - homeCache.at < HOME_TTL) return homeCache.data;
   const f = await getJson(fetchFn, `${BASE}/featuredcategories?l=english&cc=${cc}`);
   // Steam lists each variant of a product separately, e.g. hardware bundles with the same name
-  const items = (k) => [...new Map(((f[k] && f[k].items) || []).map((x) => [x.name, fromFeatured(x)])).values()];
+  // and sometimes returns unfinished placeholder entries with no name or art
+  const real = (x) => x.id && x.name && !/^uninitialized$/i.test(x.name.trim()) && (x.large_capsule_image || x.header_image);
+  const items = (k) => [...new Map(((f[k] && f[k].items) || []).filter(real).map((x) => [x.name, fromFeatured(x)])).values()];
   const groups = Object.keys(f).filter((k) => /^\d+$/.test(k)).map((k) => f[k]);
   const spotlights = groups.filter((g) => g.id === 'cat_spotlight').flatMap((g) => g.items || []).map((x) => ({
     label: x.name, image: x.header_image, url: x.url, note: String(x.body || '').replace(/\s*%1\$s\.?/, '').replace(/\s+(until|ends)$/i, '').trim(),
