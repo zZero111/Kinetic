@@ -440,3 +440,44 @@ body.pad .tile:focus, body.pad .offer:focus, body.pad .event:focus { outline: no
 
 /* a quiet placeholder while art arrives, so a slow image doesn't look like a hole */
 .tile-art, .offer-art, .event { background: #151829; }
+
+/* library tidy-ups: readable on the red corner, and a calmer footer */
+#pager-count, .pager #pager-count b { color: #fff !important; text-shadow: 1px 1px 3px rgba(0,0,0,.75) !important; }
+.hint { font-size: 19px; letter-spacing: 2px; }
+.hint.right { font-size: 16px; }
+.hint.a kbd[class=""], .hint.a kbd:not([class]) { background: #fff; color: #000; }
+footer .dots { margin: 0 auto; }
+
+/* controller buttons: round and dark, with each pad's usual colours */
+.hint kbd.xb-a, .hint kbd.xb-x, .hint kbd.xb-y, .hint kbd.ps-cross, .hint kbd.ps-square, .hint kbd.ps-triangle {
+  display: inline-grid; place-items: center; width: 34px; height: 34px; min-width: 34px; padding: 0; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #3a3d47, #15161c 70%); border: 1px solid #000; box-shadow: 0 1px 3px rgba(0,0,0,.6);
+  font-family: var(--font-body); font-size: 18px; font-weight: 700; line-height: 1;
+}
+.hint kbd.xb-a { color: #5dc21e; }
+.hint kbd.xb-x { color: #3f9bff; }
+.hint kbd.xb-y { color: #ffc61a; }
+.hint kbd.ps-cross { color: #8fb4ff; }
+.hint kbd.ps-square { color: #ff8fd0; }
+.hint kbd.ps-triangle { color: #4fe0b0; }
+
+/* keyboard keys: dark keycaps that sit alongside the controller buttons */
+.hint kbd[class=""], .hint kbd:not([class]), .hint.a kbd[class=""], .hint.a kbd:not([class]) {
+  display: inline-grid; place-items: center; height: 30px; min-width: 34px; padding: 0 10px; border-radius: 6px;
+  background: linear-gradient(#34373f, #1a1b21); border: 1px solid #000; box-shadow: 0 2px 0 #000; color: #fff;
+  font-family: var(--font-body); font-size: 14px; font-weight: 700; letter-spacing: 0; line-height: 1;
+}
+/* the letter's box is centred; these nudge the drawn shape to the optical centre */
+.hint kbd.xb-a, .hint kbd.xb-x, .hint kbd.xb-y, .hint kbd.ps-cross, .hint kbd.ps-square, .hint kbd.ps-triangle {
+  text-align: center; letter-spacing: 0; text-indent: 0; line-height: 34px; padding: 0 0 1px; box-sizing: border-box;
+}
+.hint kbd.xb-a, .hint kbd.xb-x, .hint kbd.xb-y, .hint kbd.ps-cross, .hint kbd.ps-triangle { line-height: 1; padding: 0 0 3px; }
+.hint kbd.ps-triangle { padding-bottom: 4px; }
+.hint kbd.ps-square { line-height: 1; padding: 0; font-size: 0; }
+.hint kbd.ps-square::before { content: ""; width: 13px; height: 13px; border: 2px solid currentColor; box-sizing: border-box; }
+.hint kbd[class=""], .hint kbd:not([class]), .hint.a kbd[class=""], .hint.a kbd:not([class]) { padding-bottom: 2px; }
+.hint kbd.ps-square { position: relative; }
+.hint kbd.ps-square::before { position: absolute; inset: 0; margin: auto; }
+
+/* store controller hints: a slim bar along the bottom, not a floating box */
+#pad-hints { left: 0; right: 0; bottom: 0; padding: 5px 44px; text-align: center; font-family: var(--font-body); font-size: 13px; letter-spacing: 0; background: rgba(7,8,15,.92); border-top: 1px solid #1b1e2d; }

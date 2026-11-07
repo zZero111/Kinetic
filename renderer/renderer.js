@@ -819,7 +819,8 @@ function toggleFilters() {
 
 function padHints() {
   const box = $('pad-hints');
-  const root = !buying && !osk && inputMode !== 'kbd' && navRoot();
+  // the library has its own footer hints, so this bar is only for the Store and popups
+  const root = !buying && !osk && inputMode !== 'kbd' && (tab === 'store' || openDialog()) && navRoot();
   const text = !root ? '' : itemDlg.open && document.querySelector('.si-stage video') ? 'A select · B back · X sound · Y play / pause' : openDialog() ? 'A select · B back · Right stick scroll' : tab === 'store' ? 'A select · B back · X filters · Y search · LB / RB featured · LT / RT tabs · View downloads' : 'A select · B back · LT / RT tabs · View downloads';
   if (text === padHints.last) return; // this runs 60 times a second, so it only touches the page when something changed
   padHints.last = text;
