@@ -7,7 +7,8 @@
   "scripts": {
     "start": "electron .",
     "pack": "node scripts/pack.js",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "test": "node --test tests/steamctl.test.js tests/store.test.js"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",

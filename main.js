@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, net
 const importers = require('./importers');
 const updater = require('./updater');
 const store = require('./store');
+const storeGog = require('./store_gog');
 const steamctl = require('./steamctl');
 const steamlive = require('./steamlive');
 const { spawn, execFile } = require('child_process');
@@ -1062,8 +1063,8 @@ async function refreshSteamState() {
   } catch {}
 }
 
-// add Epic, GOG or Xbox here once they have a module with the same shape as store.js
-const storeProviders = { steam: store };
+// add Epic or Xbox here once they have a module with the same shape as store.js
+const storeProviders = { steam: store, gog: storeGog };
 const provider = (id) => storeProviders[id] || store;
 
 // answers are kept for a few minutes, so moving around the Store rarely waits on the network
@@ -1080,7 +1081,7 @@ function cached(key, ms, make) {
 
 ipcMain.handle('store:home', (_e, source) => storeCall(async () => {
   await refreshSteamState();
-  return { ...(await provider(source).home(region(), storeFetch)), updates: steamGames.filter((g) => g.update), installed: steamGames.filter((g) => !g.unfinished).map((g) => g.id) };
+  return { ...(await cached(`h${source}`, 600000, () => provider(source).home(region(), storeFetch))), updates: steamGames.filter((g) => g.update), installed: steamGames.filter((g) => !g.unfinished).map((g) => g.id) };
 }));
 ipcMain.handle('store:search', (_e, term) => storeCall(() => store.search(String(term), region(), storeFetch)));
 ipcMain.handle('store:details', (_e, id, source) => storeCall(() => cached(`d${source}${id}`, 600000, () => provider(source).details(Number(id), region(), storeFetch))));
@@ -1402,7 +1403,7 @@ function closeBuyView() {
 
 ipcMain.handle('store:buy', (_e, id, name, pageUrl) => {
   const appid = Number(id);
-  const page = /^https:\/\/store\.steampowered\.com\//.test(pageUrl || '') ? pageUrl : `https://store.steampowered.com/app/${appid}/`;
+  const page = /^https:\/\/(store\.steampowered|www\.gog)\.com\//.test(pageUrl || '') ? pageUrl : `https://store.steampowered.com/app/${appid}/`;
   if ((!pageUrl && !appid) || !Number.isInteger(appid) || !win) return { ok: false, error: 'Unknown game' };
   closeBuyView();
   buyView = new WebContentsView({ webPreferences: buyPrefs });
@@ -1466,7 +1467,7 @@ ipcMain.handle('buy:close', () => closeBuyView());
 ipcMain.handle('buy:reserve', (_e, px) => { buyReserve = Math.max(0, Number(px) || 0); layoutBuyView(); });
 
 // Moves focus to the nearest control on screen in that direction, so the D-pad continues from where the page is
-// scrolled to. Runs in an isolated world on Steam's domains only, on each press. It looks at element positions and
+// scrolled to. Runs in an isolated world on Steam's and GOG's own sites only, on each press. It looks at element positions and
 // never reads field values. Tab would jump back to the last focused link, however far the page was scrolled.
 const BUY_NAV = `(dir) => {
   const cur = document.querySelector('[data-kinetic-focus]') || document.activeElement;
@@ -1527,7 +1528,8 @@ const selectBuyButton = (c) => c.executeJavaScriptInIsolatedWorld(999, [{ code: 
 const refocusMarked = (c) => c.executeJavaScriptInIsolatedWorld(999, [{ code: `document.querySelector('[data-kinetic-focus]')?.focus({ preventScroll: true })` }]).catch(() => {});
 
 const BUY_STEPS = /\/app\/\d+|\/cart|\/checkout|checkout\.steampowered\.com/;
-const isSteamPage = (c) => { try { return /(^|\.)(steampowered|steamcommunity)\.com$/.test(new URL(c.getURL()).hostname); } catch { return false; } };
+// the store sites the D-pad helper runs on; payment providers such as PayPal and banks are never included
+const isSteamPage = (c) => { try { return /(^|\.)(steampowered|steamcommunity|gog)\.com$/.test(new URL(c.getURL()).hostname); } catch { return false; } };
 const ARROWS = { up: 'Up', down: 'Down', left: 'Left', right: 'Right' };
 
 const BUY_KEYS = { up: ['Tab', ['shift']], down: ['Tab', []], left: ['Left', []], right: ['Right', []], enter: ['Return', []], space: ['Space', []], backspace: ['Backspace', []] };

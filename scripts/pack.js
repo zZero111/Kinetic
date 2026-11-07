@@ -15,7 +15,7 @@ const npmCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 
 fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
 
-for (const f of ['main.js', 'preload.js', 'importers.js', 'updater.js', 'store.js', 'steamctl.js', 'steamlive.js', 'package-lock.json']) {
+for (const f of ['main.js', 'preload.js', 'importers.js', 'updater.js', 'store.js', 'store_gog.js', 'steamctl.js', 'steamlive.js', 'package-lock.json']) {
   if (fs.existsSync(path.join(root, f))) fs.copyFileSync(path.join(root, f), path.join(stage, f));
 }
 fs.cpSync(path.join(root, 'renderer'), path.join(stage, 'renderer'), { recursive: true });

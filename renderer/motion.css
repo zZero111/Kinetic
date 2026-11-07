@@ -481,3 +481,9 @@ footer .dots { margin: 0 auto; }
 
 /* store controller hints: a slim bar along the bottom, not a floating box */
 #pad-hints { left: 0; right: 0; bottom: 0; padding: 5px 44px; text-align: center; font-family: var(--font-body); font-size: 13px; letter-spacing: 0; background: rgba(7,8,15,.92); border-top: 1px solid #1b1e2d; }
+
+.store-source { background: #0b0c14; border: 1px solid var(--line); padding: 5px 8px; font-weight: 700; text-transform: uppercase; transform: skewX(var(--skew)); }
+.store-seg { display: flex; transform: skewX(var(--skew)); }
+.store-seg button { background: transparent; border: 1px solid var(--line); padding: 5px 14px; font-size: 15px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+.store-seg button + button { border-left: 0; }
+.store-seg button.on { background: #fff; color: #000; }
