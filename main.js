@@ -3,6 +3,10 @@ const importers = require('./importers');
 const updater = require('./updater');
 const store = require('./store');
 const storeGog = require('./store_gog');
+const community = require('./community');
+const storeEpic = require('./store_epic');
+const padwatch = require('./padwatch');
+const mods = require('./mods');
 const steamctl = require('./steamctl');
 const steamlive = require('./steamlive');
 const { spawn, execFile } = require('child_process');
@@ -49,7 +53,7 @@ function saveLibrary(games) {
   libraryCache = structuredClone(games);
 }
 
-const defaultSettings = { sgdbKey: '', discordId: '', closeToTray: false, azimuthPath: '', display: '', launchAtStartup: false, startMinimised: false, startFullscreen: false, afterLaunch: 'stay', updateRepo: '', autoUpdate: true };
+const defaultSettings = { sgdbKey: '', discordId: '', closeToTray: false, azimuthPath: '', display: '', launchAtStartup: false, startMinimised: false, startFullscreen: false, afterLaunch: 'stay', updateRepo: '', autoUpdate: true, padWake: true, steamAuto: true };
 let settingsCache = null;
 function loadSettings() {
   if (!settingsCache) {
@@ -65,7 +69,7 @@ function saveSettings(s) {
 function newGame(fields) {
   return {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    title: '', exe: '', args: '', cwd: '', env: '', admin: false,
+    title: '', exe: '', args: '', cwd: '', env: '', admin: false, collections: [], mods: [],
     description: '', tag: '', cover: '', background: '', logo: '', icon: '',
     saveDir: '', displayMode: '', priority: '', preLaunch: '', postExit: '', favourite: false, playTimeSec: 0, lastPlayed: null, launches: 0,
     added: new Date().toISOString(),
@@ -90,6 +94,19 @@ function showWindow() {
   win.show();
   win.focus();
 }
+
+// Windows normally stops a background app taking focus from a game, so the window is briefly made topmost
+function bringToFront() {
+  if (!win) { createWindow(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.moveTop();
+  win.focus();
+  setTimeout(() => { if (win && !win.isDestroyed()) win.setAlwaysOnTop(false); }, 400);
+}
+app.on('kinetic-pad-wake', bringToFront);
+const updatePadWatch = () => { if (loadSettings().padWake !== false) padwatch.start(() => app.emit('kinetic-pad-wake')); else padwatch.stop(); };
 
 function createTray() {
   if (tray) return;
@@ -174,7 +191,7 @@ function createWindow() {
     if (input.type === 'keyDown' && input.key === 'F11') win.setFullScreen(!win.isFullScreen());
     if (input.type === 'keyDown' && input.key === 'Escape' && buyView) { _e.preventDefault(); closeBuyView(); }
   });
-  win.on('focus', () => { send('window:active', true); if (startupDone) { syncAzimuth(); refreshSteamState(); } });
+  win.on('focus', () => { send('window:active', true); if (startupDone) { syncAzimuth(); refreshSteamState(); checkCommunityUpdates(); } });
   win.on('blur', () => send('window:active', false));
   win.on('close', (e) => {
     if (app.isQuitting) return;
@@ -211,11 +228,14 @@ if (!app.requestSingleInstanceLock()) {
     if (loadSettings().discordId) setTimeout(discordConnect, 3000);
     if (app.isPackaged) fs.rm(path.join(process.resourcesPath, 'app.asar.new'), { force: true }, () => {}); // leftover from a failed update
     setTimeout(() => { if (loadSettings().autoUpdate !== false) checkForUpdate(); }, 8000);
-    win.webContents.once('did-finish-load', () => { setTimeout(() => { startupDone = true; syncAzimuth(); refreshSteamState(); }, 1500); if (id) launchFromShortcut(id); });
+    setTimeout(updatePadWatch, 5000); // started late, so it never competes with opening the window
+    setTimeout(startSteamQuietly, 6000);
+    win.webContents.once('did-finish-load', () => { setTimeout(() => { startupDone = true; syncAzimuth(); refreshSteamState(); checkCommunityUpdates(); }, 1500); if (id) launchFromShortcut(id); });
     app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
   });
   app.on('window-all-closed', () => { if (!loadSettings().closeToTray) app.quit(); });
   app.on('before-quit', () => { app.isQuitting = true; });
+  app.on('will-quit', () => padwatch.stop());
 }
 
 // ---------------------------------------------------------------- library IPC
@@ -298,7 +318,7 @@ function inspectGame(g) {
 ipcMain.handle('library:get', async () => {
   const games = loadLibrary();
   const info = await Promise.all(games.map(inspectGame));
-  return games.map((g, i) => ({ ...newGame({}), ...g, running: running.has(g.id), problem: info[i].problem, bgView: info[i].view, updateNeeded: g.source === 'steam' && steamGames.some((s) => s.update && s.id === String(g.sourceId)) }));
+  return games.map((g, i) => ({ ...newGame({}), ...g, running: running.has(g.id), problem: info[i].problem, bgView: info[i].view, updateNeeded: (g.source === 'steam' && steamGames.some((s) => s.update && s.id === String(g.sourceId))) || communityUpdates.has(g.id) }));
 });
 
 ipcMain.handle('library:add', async () => {
@@ -419,8 +439,18 @@ ipcMain.handle('library:update', (_e, id, patch) => {
   saveLibrary(games);
 });
 
-ipcMain.handle('library:remove', (_e, id) => {
-  saveLibrary(loadLibrary().filter((g) => g.id !== id));
+// a game Kinetic installed goes completely: its folder and its mods. Anything else only leaves the library.
+ipcMain.handle('library:remove', async (_e, id) => {
+  const games = loadLibrary();
+  const g = games.find((x) => x.id === id);
+  if (g && running.has(id)) return { ok: false, error: 'Close the game first' };
+  if (g && g.source === 'community' && g.repo) {
+    const dir = g.installDir || communityDir(g.repo);
+    if (path.basename(dir) === safeName(g.repo.replace('/', '-'))) await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    for (const m of g.mods || []) await mods.remove(m.files).catch(() => {});
+  }
+  saveLibrary(games.filter((x) => x.id !== id));
+  return { ok: true };
 });
 
 ipcMain.handle('library:pickArt', async (_e, kind) => {
@@ -878,6 +908,7 @@ ipcMain.handle('settings:set', (_e, patch) => {
       args: app.isPackaged ? ['--startup'] : [app.getAppPath(), '--startup'],
     });
   }
+  if (patch.padWake !== undefined && patch.padWake !== old.padWake) updatePadWatch();
   if (s.closeToTray) createTray();
   else if (tray && !running.size) { tray.destroy(); tray = null; }
   if (patch.discordId !== undefined && patch.discordId !== old.discordId) { if (discord) { try { discord.destroy(); } catch {} discord = null; } if (s.discordId) discordConnect(); }
@@ -1063,8 +1094,20 @@ async function refreshSteamState() {
   } catch {}
 }
 
+// real covers for community games when the user has added a SteamGridDB key, searched by the original game's name
+async function withCover(items) {
+  if (!loadSettings().sgdbKey) return;
+  await Promise.all(items.map(async (g) => {
+    const best = await cached(`art${g.repo}`, 86400000, () => sgdbBest(g.requires || g.name)).catch(() => null);
+    if (!best) return;
+    g.wide = best.background || g.wide;
+    g.capsule = g.image = best.background || best.cover || g.image;
+    g.tall = best.cover || g.tall;
+  }));
+}
+
 // add Epic or Xbox here once they have a module with the same shape as store.js
-const storeProviders = { steam: store, gog: storeGog };
+const storeProviders = { steam: store, gog: storeGog, community, epic: storeEpic };
 const provider = (id) => storeProviders[id] || store;
 
 // answers are kept for a few minutes, so moving around the Store rarely waits on the network
@@ -1081,7 +1124,9 @@ function cached(key, ms, make) {
 
 ipcMain.handle('store:home', (_e, source) => storeCall(async () => {
   await refreshSteamState();
-  return { ...(await cached(`h${source}`, 600000, () => provider(source).home(region(), storeFetch))), updates: steamGames.filter((g) => g.update), installed: steamGames.filter((g) => !g.unfinished).map((g) => g.id) };
+  const home = await cached(`h${source}`, 600000, () => provider(source).home(region(), storeFetch));
+  if (source === 'community') await withCover(home.topSellers);
+  return { ...home, updates: steamGames.filter((g) => g.update), installed: steamGames.filter((g) => !g.unfinished).map((g) => g.id) };
 }));
 ipcMain.handle('store:search', (_e, term) => storeCall(() => store.search(String(term), region(), storeFetch)));
 ipcMain.handle('store:details', (_e, id, source) => storeCall(() => cached(`d${source}${id}`, 600000, () => provider(source).details(Number(id), region(), storeFetch))));
@@ -1101,7 +1146,7 @@ let steamPoll = null;
 let lastRestart = 0;
 const STALL_MS = 3 * 60 * 1000;
 
-const jobList = () => [...steamJobs.values()].map(({ id, name, kind, state, percent, got, total, speed, estimated, live, error, needsLicense }) => ({ needsLicense: !!needsLicense, id, name, kind, state, percent: percent || 0, got: got || 0, total: total || 0, speed: speed || 0, estimated: !!estimated, live: live || null, error: error || '' }));
+const jobList = () => [...steamJobs.values()].map(({ id, name, kind, state, percent, got, total, speed, estimated, live, error, needsLicense, community: fromGithub }) => ({ community: !!fromGithub, needsLicense: !!needsLicense, id, name, kind, state, percent: percent || 0, got: got || 0, total: total || 0, speed: speed || 0, estimated: !!estimated, live: live || null, error: error || '' }));
 
 // Every change to Steam's files happens here: Steam closed first, and always started again afterwards
 async function withSteamClosed(fn) {
@@ -1143,7 +1188,7 @@ async function pollSteamJobs() {
 async function checkSteamJobs() {
   const now = Date.now();
   const snap = (await steamlive.connect()) ? await steamlive.snapshot().catch(() => null) : null;
-  for (const job of [...steamJobs.values()]) {
+  for (const job of [...steamJobs.values()].filter((j) => !j.community)) {
     const p = steamctl.progress(job.file);
     if (p && p.done) {
       steamJobs.delete(job.id);
@@ -1203,7 +1248,7 @@ async function checkSteamJobs() {
       job.changed = now;
     } else if (now - (job.sampled || now) > 20000) job.speed = 0;
   }
-  const jobs = [...steamJobs.values()];
+  const jobs = [...steamJobs.values()].filter((j) => !j.community);
   const anyActive = jobs.some((j) => j.state === 'downloading' || j.state === 'installing');
   if (anyActive) for (const j of jobs) if (j.state === 'queued') j.changed = now; // waiting its turn, not stuck
   for (const job of jobs) {
@@ -1215,14 +1260,14 @@ async function checkSteamJobs() {
       : `${job.name} did not start updating. Check that Steam is signed in.`);
   }
   // Steam pauses games it queued alongside another, so start the next one when nothing is running
-  const next = [...steamJobs.values()].find((j) => j.state === 'paused' && !j.userPaused && (j.resumes || 0) < 3);
+  const next = jobs.find((j) => steamJobs.has(j.id) && j.state === 'paused' && !j.userPaused && (j.resumes || 0) < 3);
   if (!anyActive && next && !steamBusy && now - lastRestart > 20000) {
     next.resumes = (next.resumes || 0) + 1;
     const nudged = snap && await steamlive.command('resume', next.id).then(() => true, () => false);
     if (!nudged) await withSteamClosed(() => steamctl.markForUpdate(next.file, path.join(userData(), 'steam-backups')));
   }
   send('steam:jobs', jobList());
-  if (!steamJobs.size) { clearInterval(steamPoll); steamPoll = null; }
+  if (![...steamJobs.values()].some((j) => !j.community)) { clearInterval(steamPoll); steamPoll = null; }
 }
 
 // While Steam's install prompt runs, Kinetic stays in front and Steam's windows are hidden as they appear
@@ -1298,6 +1343,7 @@ async function startSteamJobs(kind, items) {
 async function controlSteamJob(action, id) {
   const job = steamJobs.get(String(id));
   if (!job) return { ok: false, error: 'That download has finished' };
+  if (job.community) { if (action === 'cancel') job.abort.abort(); return { ok: true }; }
   const backups = path.join(userData(), 'steam-backups');
   // Steam's own commands take effect at once; an install's partial files still need the restart route below
   if (action !== 'cancel' || job.kind === 'update') {
@@ -1345,7 +1391,11 @@ async function adoptUnfinishedInstalls() {
 }
 
 ipcMain.handle('steam:control', (_e, action, id) => (['pause', 'resume', 'cancel'].includes(action) ? controlSteamJob(action, id) : { ok: false, error: 'Unknown action' }));
-ipcMain.handle('store:browse', (_e, q) => storeCall(() => cached(`b${JSON.stringify(q)}`, 300000, () => provider(q && q.source).browse(q || {}, region(), storeFetch))));
+ipcMain.handle('store:browse', (_e, q) => storeCall(async () => {
+  const r = await cached(`b${JSON.stringify(q)}`, 300000, () => provider(q && q.source).browse(q || {}, region(), storeFetch));
+  if (q && q.source === 'community') await withCover(r.items);
+  return r;
+}));
 ipcMain.handle('store:tags', (_e, source) => storeCall(() => provider(source).tags(storeFetch)));
 ipcMain.handle('steam:job', (_e, kind, items) => (kind === 'install' || kind === 'update' ? startSteamJobs(kind, items) : { ok: false, error: 'Unknown job' }));
 
@@ -1403,7 +1453,7 @@ function closeBuyView() {
 
 ipcMain.handle('store:buy', (_e, id, name, pageUrl) => {
   const appid = Number(id);
-  const page = /^https:\/\/(store\.steampowered|www\.gog)\.com\//.test(pageUrl || '') ? pageUrl : `https://store.steampowered.com/app/${appid}/`;
+  const page = /^https:\/\/(store\.steampowered|www\.gog|github|store\.epicgames)\.com\//.test(pageUrl || '') ? pageUrl : `https://store.steampowered.com/app/${appid}/`;
   if ((!pageUrl && !appid) || !Number.isInteger(appid) || !win) return { ok: false, error: 'Unknown game' };
   closeBuyView();
   buyView = new WebContentsView({ webPreferences: buyPrefs });
@@ -1556,3 +1606,157 @@ ipcMain.handle('buy:input', async (_e, action, value) => {
   }
   keepPadFocus();
 });
+
+// ---------------------------------------------------------------- community installs (see community.js)
+const communityUpdates = new Set();
+let communityChecked = 0;
+
+// at most hourly: GitHub limits unsigned requests to 60 an hour
+async function checkCommunityUpdates() {
+  if (Date.now() - communityChecked < 3600000) return;
+  communityChecked = Date.now();
+  let changed = false;
+  for (const g of loadLibrary().filter((x) => x.source === 'community' && x.repo)) {
+    const rel = await community.latest(g.repo, storeFetch).catch(() => null);
+    if (!rel) continue;
+    const needed = rel.tag_name !== g.version && !!community.pickAsset(rel.assets);
+    if (needed !== communityUpdates.has(g.id)) { changed = true; if (needed) communityUpdates.add(g.id); else communityUpdates.delete(g.id); }
+  }
+  if (changed) send('library:changed');
+}
+
+// the system drive uses Kinetic's data folder; any other drive gets a KineticGames folder
+function communityDir(repo, drive) {
+  const name = safeName(repo.replace('/', '-'));
+  const system = path.parse(userData()).root.toLowerCase();
+  return drive && /^[a-z]:\\$/i.test(drive) && drive.toLowerCase() !== system ? path.join(drive, 'KineticGames', name) : path.join(userData(), 'apps', name);
+}
+
+ipcMain.handle('system:drives', async () => {
+  const found = [];
+  for (const l of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
+    const p = `${l}:\\`;
+    const s = await fs.promises.statfs(p).catch(() => null);
+    if (s && s.blocks) found.push({ path: p, free: s.bavail * s.bsize });
+  }
+  return found;
+});
+
+// new installs and updates are the same: each extracts over the game's own folder, so saves and game files stay
+async function installCommunity(item) {
+  const key = String(item.id);
+  if (steamJobs.has(key)) return { ok: false, error: 'Already downloading' };
+  const existing = loadLibrary().find((g) => g.repo === item.repo);
+  if (existing && running.has(existing.id)) return { ok: false, error: 'Close the game first' };
+  let rel, asset;
+  try { rel = await community.latest(item.repo, storeFetch); asset = community.pickAsset(rel.assets); } catch (err) { return { ok: false, error: err.message }; }
+  if (!asset) return { ok: false, error: 'This project has no Windows download Kinetic can install' };
+  const abort = new AbortController();
+  const job = { id: key, name: item.name, kind: existing ? 'update' : 'install', community: true, state: 'downloading', got: 0, total: asset.size, percent: 0, speed: 0, abort };
+  steamJobs.set(key, job);
+  send('steam:jobs', jobList());
+  (async () => {
+    const dir = (existing && existing.installDir) || communityDir(item.repo, item.drive);
+    const zip = path.join(path.dirname(dir), `${key}.zip.part`);
+    let sampled = Date.now(), last = 0, shown = 0;
+    try {
+      await fs.promises.mkdir(dir, { recursive: true });
+      const res = await community.download(asset, zip, (u, o) => net.fetch(u, o), (got) => {
+        const now = Date.now();
+        job.got = got;
+        job.percent = Math.floor((got / asset.size) * 100);
+        if (now - sampled > 1000) { job.speed = (got - last) / ((now - sampled) / 1000); sampled = now; last = got; }
+        if (now - shown > 500) { shown = now; send('steam:jobs', jobList()); }
+      }, abort.signal);
+      job.state = 'installing';
+      send('steam:jobs', jobList());
+      await community.extract(zip, dir);
+      const exe = await community.findExe(dir);
+      if (!exe) throw new Error('No game program was found in the download');
+      const games = loadLibrary();
+      let added = null;
+      const fields = { exe, cwd: path.dirname(exe), version: rel.tag_name, sha256: res.sha, verified: res.verified, installDir: dir };
+      const found = games.find((g) => g.repo === item.repo);
+      if (found) { Object.assign(found, fields); communityUpdates.delete(found.id); } else {
+        const g = newGame({ ...fields, title: item.name, tag: 'Recomp', source: 'community', sourceKey: `community:${item.repo}`, repo: item.repo, repoId: item.id });
+        games.push(g);
+        added = g.id;
+      }
+      saveLibrary(games);
+      if (added) autoArt([added]); // only does anything once a SteamGridDB key has been added
+      send('steam:finished', true, `${item.name} is ${existing ? 'up to date' : 'installed'}${res.verified ? ' (checksum verified)' : ' (GitHub has no checksum for this file)'}`);
+    } catch (err) {
+      send('steam:finished', false, abort.signal.aborted ? `${item.name} was cancelled` : `${item.name}: ${err.message}`);
+    } finally {
+      fs.rmSync(zip, { force: true });
+      steamJobs.delete(key);
+      send('steam:jobs', jobList());
+    }
+  })();
+  return { ok: true };
+}
+
+ipcMain.handle('community:install', (_e, item) => (/^[\w.-]+\/[\w.-]+$/.test(item && item.repo) ? installCommunity(item) : { ok: false, error: 'Unknown project' }));
+
+// ---------------------------------------------------------------- mods (see mods.js)
+function gameWithMods(id) {
+  const games = loadLibrary();
+  const g = games.find((x) => x.id === id);
+  const rule = g && mods.ruleFor(g);
+  return { games, g, rule };
+}
+
+ipcMain.handle('mods:list', (_e, id) => storeCall(async () => {
+  const { g, rule } = gameWithMods(id);
+  if (!rule) throw new Error('This game has no mod support in Kinetic yet');
+  const list = await cached(`m${rule.key}`, 600000, () => mods.list(rule, storeFetch));
+  return list.slice(0, 90).map((m) => {
+    const have = (g.mods || []).find((x) => x.id === m.id);
+    return { ...m, installed: have ? have.version : '' };
+  });
+}));
+
+ipcMain.handle('mods:install', (_e, id, mod) => storeCall(async () => {
+  const { games, g, rule } = gameWithMods(id);
+  if (!rule) throw new Error('This game has no mod support in Kinetic yet');
+  if (running.has(id)) throw new Error('Close the game first');
+  const list = await cached(`m${rule.key}`, 600000, () => mods.list(rule, storeFetch));
+  const m = list.find((x) => x.id === mod); // the address comes from Thunderstore's list, never from the page
+  if (!m) throw new Error('That mod is no longer available');
+  // dependencies a game already has at this version are skipped; everything else comes first
+  const steps = mods.withDependencies(m, list).filter((x) => x.id === m.id || !(g.mods || []).some((h) => h.id === x.id && h.version === x.version));
+  for (const [i, step] of steps.entries()) {
+    const label = steps.length > 1 ? `${step.name} (${i + 1} of ${steps.length})` : step.name;
+    let shown = 0;
+    const files = await mods.install(rule, g.exe, step, storeFetch, (p) => {
+      if (Date.now() - shown < 250) return;
+      shown = Date.now();
+      send('mods:progress', m.id, label, Math.floor(p * 100));
+    });
+    g.mods = [...(g.mods || []).filter((x) => x.id !== step.id), { id: step.id, name: step.name, version: step.version, files, deps: step.deps || [] }];
+    saveLibrary(games);
+  }
+  return steps.length;
+}));
+
+ipcMain.handle('mods:remove', (_e, id, mod, force) => storeCall(async () => {
+  const { games, g } = gameWithMods(id);
+  if (!g) throw new Error('Game not found');
+  if (running.has(id)) throw new Error('Close the game first');
+  // other installed mods that rely on this one are named first, so nothing breaks silently
+  const needs = (g.mods || []).filter((x) => x.id !== mod && (x.deps || []).includes(mod)).map((x) => x.name || x.id);
+  if (needs.length && !force) return { neededBy: needs };
+  const have = (g.mods || []).find((x) => x.id === mod);
+  if (have) await mods.remove(have.files);
+  g.mods = (g.mods || []).filter((x) => x.id !== mod);
+  saveLibrary(games);
+  return true;
+}));
+
+// Steam started hidden with its debug port, so the first download never needs a restart. A Steam that is already
+// running is left alone: restarting it unasked could interrupt a download or a game.
+async function startSteamQuietly() {
+  if (loadSettings().steamAuto === false || await steamlive.connect()) return;
+  const root = await steamctl.root();
+  if (root && !(await steamctl.isRunning())) steamctl.start(root);
+}

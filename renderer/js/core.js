@@ -82,6 +82,7 @@ function visible() {
   let list = games.filter((g) => g.title.toLowerCase().includes(q));
   if (tab === 'fav') list = list.filter((g) => g.favourite);
   if (tab === 'recent') list = list.filter((g) => g.lastPlayed);
+  if (tab.startsWith('c:')) list = list.filter((g) => (g.collections || []).includes(tab.slice(2)));
   const sort = tab === 'recent' ? 'last' : $('sort').value;
   const by = {
     name: (a, b) => a.title.localeCompare(b.title),
@@ -107,6 +108,25 @@ function select(i, dir) {
   index = (i + list.length) % list.length;
   selectedId = list[index].id;
   render(dir || (i < old ? 'prev' : 'next'));
+}
+
+// each collection is a tab beside All, Favourites and Recent, filtering the same carousel
+function drawCollectionTabs() {
+  const names = [...new Set(games.flatMap((g) => g.collections || []))].sort((a, b) => a.localeCompare(b));
+  document.querySelectorAll('#tabs [data-collection]').forEach((t) => t.remove());
+  const store = document.querySelector('#tabs [data-tab=store]');
+  for (const name of names) {
+    const b = el('button', 'tab');
+    b.type = 'button';
+    b.dataset.tab = 'c:' + name;
+    b.dataset.collection = '1';
+    const sp = el('span', '', name + ' ');
+    sp.append(el('b', '', games.filter((g) => (g.collections || []).includes(name)).length));
+    b.append(sp);
+    b.onclick = () => { tab = 'c:' + name; index = 0; selectedId = null; render('in'); };
+    store.before(b);
+  }
+  if (tab.startsWith('c:') && !names.includes(tab.slice(2))) tab = 'all';
 }
 
 // ---------------------------------------------------------------- render
@@ -244,7 +264,7 @@ function buildFeature(g, list) {
   actions.append(play, details, fav);
   if (g.updateNeeded) {
     const up = el('button', 'btn', 'Update');
-    up.onclick = () => steamJob('update', [{ id: g.sourceId, name: g.title }]);
+    up.onclick = () => (g.source === 'community' ? communityGet({ id: g.repoId, repo: g.repo, name: g.title }) : steamJob('update', [{ id: g.sourceId, name: g.title }]));
     actions.append(up);
   }
   d.append(actions);
@@ -287,6 +307,7 @@ async function refresh(force) {
   if (!first && force !== true && json === lastData) return;
   lastData = json;
   games = data;
+  drawCollectionTabs();
   // wait briefly for the art so the card is drawn complete; a slow drive can't hold it up
   const list = visible();
   current(list);

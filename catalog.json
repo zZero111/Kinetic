@@ -1,0 +1,133 @@
+[
+  {
+    "id": 472575717,
+    "repo": "HarbourMasters/Shipwright",
+    "title": "Ship of Harkinian",
+    "about": "A PC port of Ocarina of Time.",
+    "needs": "The Legend of Zelda: Ocarina of Time",
+    "logo": "https://raw.githubusercontent.com/HarbourMasters/Shipwright/develop/soh/macosx/sohIcon.png"
+  },
+  {
+    "id": 718907857,
+    "repo": "2ship2harkinian/2ship2harkinian",
+    "title": "2 Ship 2 Harkinian",
+    "about": "A PC port of Majora's Mask.",
+    "needs": "The Legend of Zelda: Majora's Mask",
+    "logo": "https://raw.githubusercontent.com/2ship2harkinian/2ship2harkinian/develop/mm/assets/custom/textures/icons/g2ShipIcon.png"
+  },
+  {
+    "id": 708994262,
+    "repo": "Zelda64Recomp/Zelda64Recomp",
+    "title": "Zelda 64: Recompiled",
+    "about": "A static recompilation of Majora's Mask for PC, with mod support.",
+    "needs": "The Legend of Zelda: Majora's Mask",
+    "shots": [
+      "https://raw.githubusercontent.com/Zelda64Recomp/Zelda64Recomp/dev/docs/deck_gyro_1.jpg"
+    ]
+  },
+  {
+    "id": 934549500,
+    "repo": "BanjoRecomp/BanjoRecomp",
+    "title": "Banjo: Recompiled",
+    "about": "A PC port of Banjo-Kazooie made with N64: Recompiled.",
+    "needs": "Banjo-Kazooie"
+  },
+  {
+    "id": 802614930,
+    "repo": "DinosaurPlanetRecomp/dino-recomp",
+    "title": "Dinosaur Planet Recompiled",
+    "about": "A native port of the Dinosaur Planet prototype.",
+    "needs": "the Dinosaur Planet prototype"
+  },
+  {
+    "id": 931851021,
+    "repo": "klorfmorf/Goemon64Recomp",
+    "title": "Goemon 64: Recompiled",
+    "about": "An unofficial PC port of Mystical Ninja Starring Goemon.",
+    "needs": "Mystical Ninja Starring Goemon"
+  },
+  {
+    "id": 803601986,
+    "repo": "HarbourMasters/Starship",
+    "title": "Starship",
+    "about": "A PC port of Star Fox 64.",
+    "needs": "Star Fox 64",
+    "logo": "https://raw.githubusercontent.com/HarbourMasters/Starship/main/logo.png"
+  },
+  {
+    "id": 783333624,
+    "repo": "HarbourMasters/SpaghettiKart",
+    "title": "Spaghetti Kart",
+    "about": "A PC port of Mario Kart 64.",
+    "needs": "Mario Kart 64"
+  },
+  {
+    "id": 865232212,
+    "repo": "hedge-dev/UnleashedRecomp",
+    "title": "Unleashed Recompiled",
+    "about": "An unofficial PC port of the Xbox 360 version of Sonic Unleashed, made by static recompilation.",
+    "needs": "Sonic Unleashed (Xbox 360)",
+    "logo": "https://raw.githubusercontent.com/hedge-dev/UnleashedRecompResources/refs/heads/main/images/logo/Logo.png"
+  },
+  {
+    "id": 669207138,
+    "repo": "perfect-dark-pc-port/perfect_dark",
+    "title": "Perfect Dark Port",
+    "about": "A work-in-progress PC port of Perfect Dark.",
+    "needs": "Perfect Dark",
+    "logo": "https://raw.githubusercontent.com/perfect-dark-pc-port/perfect_dark/port/dist/nswitch/icon.jpg"
+  },
+  {
+    "id": 801786411,
+    "repo": "isledecomp/isle-portable",
+    "title": "LEGO Island Portable",
+    "about": "A portable version of LEGO Island (1997).",
+    "needs": "LEGO Island"
+  },
+  {
+    "id": 143324737,
+    "repo": "diasurgical/DevilutionX",
+    "title": "DevilutionX",
+    "about": "Diablo built for modern operating systems.",
+    "needs": "Diablo"
+  },
+  {
+    "id": 18348651,
+    "repo": "OpenRCT2/OpenRCT2",
+    "title": "OpenRCT2",
+    "about": "An open-source re-implementation of RollerCoaster Tycoon 2.",
+    "needs": "RollerCoaster Tycoon 2",
+    "logo": "https://raw.githubusercontent.com/OpenRCT2/OpenRCT2/develop/resources/logo/icon_x1024.png",
+    "shots": [
+      "https://github.com/user-attachments/assets/fa893cc8-1484-4751-94be-4ead00a6c8f9"
+    ]
+  },
+  {
+    "id": 116523281,
+    "repo": "OpenLoco/OpenLoco",
+    "title": "OpenLoco",
+    "about": "An open-source re-implementation of Chris Sawyer's Locomotion.",
+    "needs": "Chris Sawyer's Locomotion"
+  },
+  {
+    "id": 12363387,
+    "repo": "CorsixTH/CorsixTH",
+    "title": "CorsixTH",
+    "about": "An open-source clone of Theme Hospital.",
+    "needs": "Theme Hospital"
+  },
+  {
+    "id": 28884050,
+    "repo": "Interkarma/daggerfall-unity",
+    "title": "Daggerfall Unity",
+    "about": "An open-source recreation of Daggerfall.",
+    "needs": "The Elder Scrolls II: Daggerfall"
+  },
+  {
+    "id": 14650917,
+    "repo": "SuperTux/supertux",
+    "title": "SuperTux",
+    "about": "A free classic 2D jump-and-run game.",
+    "needs": ""
+  }
+]

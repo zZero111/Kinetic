@@ -13,7 +13,7 @@ const itemDlg = $('store-item');
 let storeRun = 0; // only the newest request may draw, so a slow reply can't replace a newer search
 let installedIds = new Set();
 let itemId = null;
-let itemName = '', itemUrl = '', itemGame = null;
+let itemName = '', itemUrl = '', itemGame = null, itemRepo = '';
 
 async function steamAction(action, id) {
   const r = await window.api.steamAction(action, id);
@@ -27,7 +27,14 @@ function priceText(x) {
 
 // The page works from the common game format in store.js, so other stores can feed it later
 let STORE_SOURCE = 'steam';
-const STORE_NAMES = { steam: 'Steam', gog: 'GOG' };
+const STORE_NAMES = { steam: 'Steam', gog: 'GOG', epic: 'Epic', community: 'Recomps' };
+const isEpic = () => STORE_SOURCE === 'epic';
+const isCommunity = () => STORE_SOURCE === 'community';
+const hasRepo = (repo) => games.some((g) => g.repo === repo);
+async function communityGet(item) {
+  const r = await window.api.communityInstall(item);
+  if (!r.ok) toast(r.error, true);
+}
 const isSteam = () => STORE_SOURCE === 'steam';
 const STORE_TABS = [['all', 'All', {}], ['new', 'New', { sort: 'Released_DESC' }], ['top', 'Top rated', { sort: 'Reviews_DESC' }], ['sale', 'On sale', { specials: true }], ['free', 'Free', { maxprice: 'free' }], ['wish', 'Wishlist', {}]];
 const STORE_FEATURES = [['2', 'Single-player'], ['1', 'Multi-player'], ['9', 'Co-op'], ['49', 'PvP'], ['28', 'Full controller support'], ['22', 'Achievements'], ['23', 'Cloud saves'], ['30', 'Workshop'], ['29', 'Trading cards']];
@@ -52,6 +59,19 @@ const wasPrice = (x) => x.was || (x.discount && x.original ? priceText({ ...x, f
 
 // tries the store's tall or wide art, then falls back to the image that is always there
 function artImg(x, prefer) {
+  if (!x[prefer] && !x.image) {
+    const card = el('div', 'art-card');
+    card.style.setProperty('--hue', hue(x.name));
+    if (x.logo) {
+      const logo = el('img', 'art-logo');
+      logo.src = x.logo;
+      logo.alt = '';
+      logo.onerror = () => logo.remove();
+      card.append(logo);
+    }
+    card.append(el('span', '', plainText(x.name)));
+    return card;
+  }
   const img = el('img');
   img.alt = '';
   img.loading = 'lazy';
@@ -106,6 +126,7 @@ function showEvents(i) {
 function drawEvents(data) {
   const onSale = [...data.specials, ...data.topSellers, ...data.newReleases].filter((x) => x.discount);
   const unique = [...new Map(onSale.map((x) => [x.id, x])).values()].filter((x) => !data.daily.some((d) => d.id === x.id));
+  if (!data.spotlights.length && !data.specials.length) { eventPages = []; offersBox.replaceChildren(); return; }
   const deals = [...data.daily.map((x) => ({ x, label: "Today's deal" })), ...unique.sort((a, b) => b.discount - a.discount).map((x) => ({ x, label: 'Special offer' }))];
   // only full pages, so the layout always fills the width
   const count = Math.max(1, Math.min(Math.ceil(data.spotlights.length / 2), Math.floor(deals.length / 4)));
@@ -166,10 +187,10 @@ async function drawHero() {
   card.className = 'store-hero';
   card.style.setProperty('--hue', hue(x.name));
   const bg = el('div', 'bg');
-  bg.style.backgroundImage = `url('${x.wide}'), url('${x.image}')`;
+  if (x.wide) bg.style.backgroundImage = `url('${x.wide}'), url('${x.image}')`;
   const frame = el('div', 'cover-frame has-img');
   const cover = artImg(x, 'tall');
-  cover.className = 'main fill';
+  cover.classList.add('main', 'fill');
   frame.append(cover);
   const d = el('div', 'detail');
   const line = el('div', 'dline');
@@ -192,7 +213,9 @@ async function drawHero() {
   const heart = el('button', 'btn fav' + (isWished(x) ? ' on' : ''), '♥');
   heart.title = 'Wishlist';
   heart.onclick = () => { toggleWish(x); heart.classList.toggle('on', isWished(x)); };
-  actions.append(buy, add, heart);
+  actions.append(buy);
+  if (!isCommunity() && !isEpic()) actions.append(add);
+  actions.append(heart);
   d.append(line, el('h2', 'dtitle', plainText(x.name)), desc, stats, bar, actions);
   card.append(bg, el('div', 'tint'), frame, d);
   const strips = el('div');
@@ -203,7 +226,7 @@ async function drawHero() {
     st.type = 'button';
     st.style.setProperty('--hue', hue(g.name));
     const sb = el('div', 'sbg');
-    sb.style.backgroundImage = `url('${g.wide}'), url('${g.image}')`;
+    if (g.wide) sb.style.backgroundImage = `url('${g.wide}'), url('${g.image}')`;
     const inner = el('div', 'sin');
     inner.append(el('div', 'snum', pad(i + 1)), g.discount ? el('div', 'soff', `-${g.discount}%`) : el('div', 'sdot'), el('div', 'sname', plainText(g.name)));
     st.append(sb, inner);
@@ -220,8 +243,9 @@ async function drawHero() {
   const [r, onAccount] = await Promise.all([window.api.storeDetails(id, STORE_SOURCE), isSteam() ? window.api.steamOwned(id) : null]);
   if (heroList[heroIndex] !== x) return;
   const free = r.ok && r.data.free;
-  buy.textContent = installedIds.has(String(id)) ? 'Installed' : isSteam() && (onAccount || free) ? 'Download' : 'Buy now';
-  buy.disabled = installedIds.has(String(id));
+  const have = isCommunity() ? hasRepo(x.repo) : installedIds.has(String(id));
+  buy.textContent = have ? 'Installed' : isCommunity() || (isSteam() && (onAccount || free)) ? 'Download' : 'Buy now';
+  buy.disabled = have || (isCommunity() && r.ok && !r.data.canInstall);
   if (!r.ok) return;
   const g = r.data;
   tag.textContent = g.genres[0] || 'Game';
@@ -239,14 +263,15 @@ function stepHero(by) {
 }
 
 function heroAction(x, btn) {
-  if (btn.textContent === 'Download') steamJob('install', [{ id: x.id, name: plainText(x.name) }]);
+  if (btn.textContent === 'Download' && isCommunity()) communityGet({ id: x.id, repo: x.repo, name: plainText(x.name) });
+  else if (btn.textContent === 'Download') steamJob('install', [{ id: x.id, name: plainText(x.name) }]);
   else if (btn.textContent === 'Buy now') { itemId = x.id; itemName = plainText(x.name); itemUrl = x.url || ''; $('si-open').click(); }
 }
 
 // ---- wishlist and cart are Kinetic's own: an outside app can't write to a Steam account's cart
 const isWished = (x) => wishlist.some((w) => w.id === x.id);
 const inCart = (x) => cart.some((w) => w.id === x.id);
-const slim = (x) => ({ id: x.id, source: x.source || STORE_SOURCE, name: plainText(x.name), final: x.final, currency: x.currency, price: shownPrice(x), image: x.image, capsule: x.capsule, url: x.url });
+const slim = (x) => ({ id: x.id, source: x.source || STORE_SOURCE, name: plainText(x.name), final: x.final, currency: x.currency, price: shownPrice(x), image: x.image, capsule: x.capsule, url: x.url, logo: x.logo, repo: x.repo });
 function toggleWish(x) {
   wishlist = isWished(x) ? wishlist.filter((w) => w.id !== x.id) : [...wishlist, slim(x)];
   keep();
@@ -280,7 +305,7 @@ function openCart() {
 $('cart-go').onclick = async () => {
   const c = cart[0];
   $('cart').close('cancel');
-  const r = await window.api.storeBuy(c.source === 'gog' ? 0 : c.id, c.name, c.url);
+  const r = await window.api.storeBuy(c.source && c.source !== 'steam' ? 0 : c.id, c.name, c.url);
   if (!r.ok) toast(r.error, true);
 };
 window.api.onBought((id) => { cart = cart.filter((c) => c.id !== id); keep(); drawCartButton(); });
@@ -303,10 +328,10 @@ async function loadMore(run) {
   const r = await window.api.storeBrowse({ ...browseQ, source: STORE_SOURCE, term: $('search').value.trim(), start: browseStart });
   if (run !== storeRun) return;
   browseLoading = false;
-  if (!r.ok) { browseHead.textContent = 'Could not load the store'; return; }
+  if (!r.ok) { browseSub.textContent = ''; browseGrid.replaceChildren(el('p', 'store-msg', r.error)); return; }
   browseTotal = r.data.total;
   browseStart += 50;
-  browseSub.textContent = `${browseTotal.toLocaleString()} games`;
+  browseSub.textContent = isEpic() ? "Epic's free games. Its full catalogue can only be browsed on Epic's site." : isCommunity() ? 'Type owner/name in search to add any GitHub project' : `${browseTotal.toLocaleString()} games`;
   browseGrid.append(...r.data.items.map((x) => gameCard(x, ++browseCount)));
   // the first rows are on screen straight away, so they skip the lazy-loading wait
   if (browseCount <= 50) [...browseGrid.querySelectorAll('img')].slice(0, 21).forEach((i) => { i.loading = 'eager'; i.fetchPriority = 'high'; });
@@ -417,7 +442,7 @@ function drawStoreTabs() {
   lib.dataset.back = '1';
   lib.append(Object.assign(el('span'), { textContent: '‹ Library' }));
   lib.onclick = () => document.querySelector('[data-tab=all]').click();
-  box.replaceChildren(lib, ...STORE_TABS.map(([id, label]) => {
+  box.replaceChildren(lib, ...STORE_TABS.filter(([id]) => !(isCommunity() || isEpic()) || id === 'all' || id === 'wish').map(([id, label]) => {
     const b = el('button', 'tab' + (id === storeTab ? ' active' : ''));
     b.type = 'button';
     b.dataset.store = id;
@@ -500,7 +525,9 @@ async function showStore() {
     };
     source.append(b);
   }
-  filters.hidden = !isSteam(); // GOG's page has the tabs and sort, but not Steam's tags and features
+  filters.hidden = !isSteam(); // the other stores have the tabs and sort, but not Steam's tags and features
+  cartBtn.hidden = isCommunity() || isEpic();
+  sort.hidden = isCommunity() || isEpic();
   bar.append(source, cartBtn, pager);
   if (isSteam() && r.data.updates.length) {
     const up = el('button', 'store-btn hot', `Update ${r.data.updates.length} ${r.data.updates.length === 1 ? 'game' : 'games'}`);
@@ -600,7 +627,7 @@ async function openStoreItem(id) {
   meta.append(el('span', 'tag', installedIds.has(String(id)) ? 'Installed' : price));
   if (d.discount) meta.append(el('span', 'tag warn', `-${d.discount}%`));
   const facts = el('div', 'si-facts');
-  for (const [k, v] of [['Rating', d.rating ? d.rating + '%' : ''], ['Released', d.released], ['Developer', d.developers.join(', ')], ['Genres', d.genres.slice(0, 3).join(', ')]]) {
+  for (const [k, v] of [['Requires', d.requires], ['Rating', d.rating ? d.rating + '%' : ''], ['Released', d.released], ['Developer', d.developers.join(', ')], ['Genres', d.genres.slice(0, 3).join(', ')]]) {
     if (v) { const r2 = el('div'); r2.append(el('label', '', k), el('span', '', v)); facts.append(r2); }
   }
   const media = el('div', 'si-media');
@@ -628,20 +655,24 @@ async function openStoreItem(id) {
   media.append(stage2, strip);
   const info = el('div', 'si-info');
   info.append(el('h2', '', d.name), meta, el('p', 'si-desc', plainText(d.description)), facts);
+  if (d.notes) info.append(el('h3', '', 'Latest release'), el('p', 'hint-text', d.notes));
   body.replaceChildren(media, info);
   if (items.length) show(items[0], strip.firstChild);
-  else { const i = el('img'); i.src = d.image; i.alt = ''; stage2.replaceChildren(i); }
+  else stage2.replaceChildren(artImg(d, 'wide'));
   const owned = installedIds.has(String(id));
   // a paid game that isn't on the account can only be bought, so Install is not offered for it
   const onAccount = isSteam() ? await window.api.steamOwned(id) : null;
   if (itemId !== id) return;
+  const have = isCommunity() && hasRepo(d.repo);
   const noInstall = !isSteam() || owned || d.comingSoon || (!d.free && onAccount === false);
-  $('si-install').hidden = noInstall;
+  $('si-install').textContent = have ? 'Installed' : 'Download';
+  $('si-install').hidden = isCommunity() ? have || !d.canInstall : noInstall;
+  itemRepo = d.repo || '';
   itemStorage = d.storage;
-  await drawDrives(noInstall);
+  await drawDrives(isCommunity() ? have || !d.canInstall : noInstall);
   if (itemId !== id) return;
   $('si-open').hidden = isSteam() && (d.free || owned || onAccount === true);
-  $('si-open').textContent = isSteam() ? 'Buy' : 'Open on GOG';
+  $('si-open').textContent = isSteam() ? 'Buy' : isCommunity() ? 'View on GitHub' : `Open on ${STORE_NAMES[STORE_SOURCE]}`;
   itemUrl = d.url || '';
   itemGame = slim({ ...d, price });
   $('si-wish').textContent = isWished(itemGame) ? 'On your wishlist' : 'Add to wishlist';
@@ -656,7 +687,7 @@ async function drawDrives(hide) {
   sel.hidden = hide;
   $('si-space').textContent = '';
   if (hide) return;
-  const libs = (await window.api.steamLibraries()).sort((a, b) => b.free - a.free);
+  const libs = (await (isCommunity() ? window.api.drives() : window.api.steamLibraries())).sort((a, b) => b.free - a.free);
   sel.replaceChildren(...libs.map((l) => new Option(`${l.path.slice(0, 2).toUpperCase()} (${fmtBytes(l.free)} free)`, l.path)));
   checkDrive();
 }
@@ -686,6 +717,7 @@ window.api.onBought((id, name) => {
   $('buy-hints').textContent = `${name} is on your account. Go back to download it.`;
 });
 $('si-install').onclick = () => {
+  if (isCommunity()) { const drive = $('si-lib').value; itemDlg.close('cancel'); communityGet({ id: itemId, repo: itemRepo, name: itemName, drive }); return; }
   const lib = $('si-lib').value;
   itemDlg.close('cancel');
   steamJob('install', [{ id: itemId, name: itemName, lib }]);
@@ -796,6 +828,7 @@ function drawJobs(list) {
     r.detail.textContent = jobDetail(j);
     r.fill.style.width = j.percent + '%';
     drawStages(r, j);
+    r.toggle.hidden = j.community;
     r.toggle.textContent = j.needsLicense ? 'Get in Steam' : j.state === 'failed' ? 'Retry' : j.state === 'paused' ? 'Resume' : 'Pause';
     r.detail.classList.toggle('bad', !!j.error);
     if (was !== j.state) { r.toggle.disabled = false; r.cancel.disabled = false; }

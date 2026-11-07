@@ -39,7 +39,7 @@ window.api.onFailed((id, msg) => {
 
 const importDlg = $('importer');
 // also true on the Store page, where the library's keys and controller buttons must not act
-const modalOpen = () => dlg.open || settingsDlg.open || importDlg.open || $('store-item').open || $('cart').open || tab === 'store';
+const modalOpen = () => dlg.open || settingsDlg.open || importDlg.open || $('store-item').open || $('cart').open || $('mods').open || tab === 'store';
 
 // ---- import installed games from Steam / Epic / GOG
 const PLATFORM_NAMES = { steam: 'Steam', epic: 'Epic Games', gog: 'GOG' };

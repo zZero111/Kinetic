@@ -2,6 +2,8 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const store = require('../store');
 const gog = require('../store_gog');
+const community = require('../community');
+const fs = require('fs'), os = require('os'), path = require('path');
 const { compareVersions } = require('../updater');
 
 const row = `<a href="https://store.steampowered.com/app/620/Portal_2/" data-ds-appid="620"><img src="https://x/c.jpg" ><span class="title">Portal 2</span>
@@ -43,6 +45,60 @@ test('GOG products become the common game format', () => {
   assert.equal(g.final, 500);
   assert.equal(g.discount, 50);
   assert.equal(g.url, 'https://www.gog.com/en/game/test');
+});
+
+test('the Windows zip is chosen from a release', () => {
+  const pick = (...n) => community.pickAsset(n.map((name) => ({ name })))?.name;
+  assert.equal(pick('App-Linux.zip', 'App-Windows.zip', 'App-macOS.zip'), 'App-Windows.zip');
+  assert.equal(pick('app-windows-portable-win32.zip', 'app-windows-portable-x64.zip', 'app-windows-installer-x64.exe'), 'app-windows-portable-x64.zip');
+  assert.equal(pick('pd-i686-windows.zip', 'pd-x86_64-windows.zip'), 'pd-x86_64-windows.zip');
+  assert.equal(pick('App-Linux.zip'), undefined);
+});
+
+test('a download that does not match its checksum is refused and deleted', async () => {
+  const dest = path.join(os.tmpdir(), `kinetic-${process.pid}.bin`);
+  const fetchFn = async () => new Response('hello');
+  const good = 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';
+  assert.deepEqual((await community.download({ browser_download_url: 'x', digest: good }, dest, fetchFn, () => {})).verified, true);
+  await assert.rejects(community.download({ browser_download_url: 'x', digest: 'sha256:' + '0'.repeat(64) }, dest, fetchFn, () => {}), /checksum/);
+  assert.equal(fs.existsSync(dest), false);
+});
+
+test('removing a mod deletes only the files it added', async () => {
+  const mods = require('../mods');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kinetic-mods-'));
+  const mine = path.join(dir, 'a.nrm'), theirs = path.join(dir, 'b.nrm');
+  fs.writeFileSync(mine, 'x'); fs.writeFileSync(theirs, 'y');
+  await mods.remove([mine]);
+  assert.equal(fs.existsSync(mine), false);
+  assert.equal(fs.existsSync(theirs), true);
+});
+
+test('dependencies come first, once each, even in a loop', () => {
+  const mods = require('../mods');
+  const a = { id: 'a', deps: ['b', 'c'] }, b = { id: 'b', deps: ['c', 'a'] }, c = { id: 'c', deps: ['gone'] };
+  assert.deepEqual(mods.withDependencies(a, [a, b, c]).map((m) => m.id), ['c', 'b', 'a']);
+});
+
+test('every catalogue entry is usable', () => {
+  const list = require('../catalog.json');
+  assert.ok(list.length >= 15);
+  assert.equal(new Set(list.map((c) => c.id)).size, list.length);
+  for (const c of list) { assert.ok(Number.isInteger(c.id)); assert.match(c.repo, /^[\w.-]+\/[\w.-]+$/); assert.ok(c.title && c.about); }
+});
+
+test('Epic promotions become the common game format', () => {
+  const epic = require('../store_epic');
+  const g = epic.toGame({ id: 'abc', title: 'Test', productSlug: 'test', keyImages: [{ type: 'OfferImageWide', url: 'https://x/w.jpg' }], price: { totalPrice: { discountPrice: 0, originalPrice: 1999, currencyCode: 'GBP', fmtPrice: { discountPrice: '0', originalPrice: '£19.99' } } } });
+  assert.equal(g.price, 'Free');
+  assert.equal(g.discount, 100);
+  assert.equal(g.url, 'https://store.epicgames.com/en-US/p/test');
+});
+
+test('only games with a rule offer mods', () => {
+  const mods = require('../mods');
+  assert.ok(mods.ruleFor({ repo: 'Zelda64Recomp/Zelda64Recomp' }));
+  assert.equal(mods.ruleFor({ repo: 'someone/else' }), null);
 });
 
 test('versions compare as numbers', () => {

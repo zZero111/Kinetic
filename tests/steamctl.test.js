@@ -57,3 +57,13 @@ test('an unowned install is reported as unowned', () => {
 test('folder names are safe for Windows', () => {
   assert.equal(c.safeFolder('Bad: "Name"? / Test.'), 'Bad Name Test');
 });
+
+test('the controller watcher reports only the combination it was told about', async () => {
+  const pad = require('../padwatch');
+  const got = await new Promise((resolve) => {
+    const seen = [];
+    pad.start(() => seen.push('combo'), "[Console]::Out.WriteLine('ready'); [Console]::Out.WriteLine('other'); [Console]::Out.WriteLine('combo')").on('exit', () => setTimeout(() => resolve(seen), 50));
+  });
+  pad.stop();
+  assert.deepEqual(got, ['combo']);
+});

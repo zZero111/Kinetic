@@ -7,7 +7,7 @@ const held = {}, repeatAt = {};
 let padTimer = 0, zone = null; // zone: 'header' or 'jobs' while the controller is in one of those areas
 let buying = false, padLatch = false;
 
-const openDialog = () => [dlg, settingsDlg, importDlg, $('store-item'), $('cart')].find((d) => d.open);
+const openDialog = () => [dlg, settingsDlg, importDlg, $('store-item'), $('cart'), $('mods')].find((d) => d.open);
 function navRoot() {
   const side = document.querySelector('.store-side');
   if (openDialog()) return openDialog();
@@ -181,15 +181,33 @@ function toggleFilters() {
   else focusEl(storeStart() || storeEl);
 }
 
+// on the Library's tabs A selects, and X and Y do nothing, so the footer says so
+function drawFooterHints() {
+  const onTop = tab !== 'store' && zone === 'header';
+  if (onTop === drawFooterHints.top) return;
+  drawFooterHints.top = onTop;
+  const hints = document.querySelectorAll('footer .hint');
+  hints[0].lastChild.textContent = onTop ? ' Select' : ' Play';
+  hints[1].style.visibility = hints[2].style.visibility = onTop ? 'hidden' : '';
+}
+
 function padHints() {
   const box = $('pad-hints');
   // the library has its own footer hints, so this bar is only for the Store and popups
   const root = !buying && !osk && inputMode !== 'kbd' && (tab === 'store' || openDialog()) && navRoot();
-  const text = !root ? '' : itemDlg.open && document.querySelector('.si-stage video') ? 'A select · B back · X sound · Y play / pause' : openDialog() ? 'A select · B back · Right stick scroll' : tab === 'store' ? 'A select · B back · X filters · Y search · LB / RB featured · LT / RT tabs · View downloads' : 'A select · B back · LT / RT tabs · View downloads';
+  const text = !root ? '' : itemDlg.open && document.querySelector('.si-stage video') ? 'a:Select b:Back x:Sound y:Play / pause' : openDialog() ? 'a:Select b:Back' : isSteam() ? 'a:Select b:Back x:Filters y:Search LB/RB:Featured LT/RT:Tabs View:Downloads' : 'a:Select b:Back y:Search LB/RB:Featured LT/RT:Tabs View:Downloads';
+  drawFooterHints();
   if (text === padHints.last) return; // this runs 60 times a second, so it only touches the page when something changed
   padHints.last = text;
   box.hidden = !root;
-  box.textContent = text;
+  box.replaceChildren(...text.split(/ (?=[\w/]+:)/).filter(Boolean).map((part) => {
+    const [key, label] = part.split(':');
+    const set = GLYPHS[inputMode];
+    const item = el('span', 'hint');
+    const g = { a: set.play, x: set.details, y: set.fav, b: inputMode === 'ps' ? ['○', 'ps-circle'] : ['B', 'xb-b'] }[key];
+    item.append(g ? Object.assign(el('kbd', g[1], g[0])) : el('kbd', 'pad-word', key), document.createTextNode(label));
+    return item;
+  }));
 }
 
 function readPad(p) {

@@ -8,6 +8,9 @@ function openEdit(g) {
   $('e-title').value = g.title;
   $('e-desc').value = g.description || '';
   $('e-tag').value = g.tag || '';
+  $('e-coll').value = (g.collections || []).join(', ');
+  $('e-mods').hidden = !MOD_GAMES.includes(g.repo);
+  $('e-remove').textContent = g.source === 'community' ? 'Uninstall' : 'Remove';
   $('e-args').value = g.args || '';
   $('e-cwd').value = g.cwd || '';
   $('e-env').value = g.env || '';
@@ -58,6 +61,59 @@ $('e-sgdb').onclick = async () => {
   }
 };
 
+// ---- mods
+const MOD_GAMES = ['Zelda64Recomp/Zelda64Recomp', 'HarbourMasters/Shipwright', '2ship2harkinian/2ship2harkinian'];
+const modStatus = new Map();
+window.api.onModProgress((id, label, pct) => { const s = modStatus.get(id); if (s) s.textContent = `${label} ${pct}%`; });
+
+async function drawMods(g, warn) {
+  const box = $('mods-list');
+  box.replaceChildren(el('p', 'store-msg', 'Loading mods…'));
+  const r = await window.api.modsList(g.id);
+  if (!r.ok) { box.replaceChildren(el('p', 'store-msg', r.error)); return; }
+  box.replaceChildren(...r.data.map((m) => {
+    const row = el('div', 'mod-row');
+    const pic = el('img');
+    pic.src = m.icon;
+    pic.alt = '';
+    pic.loading = 'lazy';
+    const text = el('div', 'mod-text');
+    text.append(el('b', '', m.name), el('span', '', m.about), el('small', '', `${m.owner} · v${m.version} · ${m.downloads.toLocaleString()} downloads`));
+    const btns = el('div', 'mod-btns');
+    const act = async (fn, busy, force) => {
+      // large texture packs take minutes, so the row itself shows the work until it finishes
+      const status = el('span', 'mod-busy', busy);
+      btns.replaceChildren(status);
+      modStatus.set(m.id, status);
+      const res = await fn(g.id, m.id, force);
+      modStatus.delete(m.id);
+      if (!res.ok) toast(res.error, true);
+      else if (res.data?.neededBy) { drawMods(g, { id: m.id, names: res.data.neededBy }); return; }
+      else if (res.data > 1) toast(`${m.name} installed, with ${res.data - 1} mod${res.data > 2 ? 's' : ''} it needs`);
+      drawMods(g);
+    };
+    const add = (label, fn, busy, force) => { const b = el('button', '', label); b.type = 'button'; b.onclick = () => act(fn, busy, force); btns.append(b); };
+    if (!m.installed) add('Install', window.api.modsInstall, `Installing ${m.name}…`);
+    else {
+      if (m.installed !== m.version) add('Update', window.api.modsInstall, `Updating ${m.name}…`);
+      if (warn && warn.id === m.id) {
+        text.append(el('small', 'bad', `Needed by ${warn.names.join(', ')}. Removing it may break them.`));
+        add('Remove anyway', window.api.modsRemove, `Removing ${m.name}…`, true);
+      } else add('Remove', window.api.modsRemove, `Removing ${m.name}…`);
+    }
+    row.append(pic, text, btns);
+    return row;
+  }));
+}
+$('e-mods').onclick = () => {
+  const g = editing;
+  dlg.close('cancel');
+  $('mods-title').textContent = `${g.title} mods`;
+  $('mods').returnValue = '';
+  $('mods').showModal();
+  drawMods(g);
+};
+
 $('e-pick-save').onclick = async () => {
   const p = await window.api.pickFolder();
   if (p) $('e-save').value = p;
@@ -74,19 +130,20 @@ $('e-startmenu').onclick = async () => { const r = await window.api.shortcut(edi
 $('e-steam').onclick = async () => { const r = await window.api.addToSteam(editing.id); toast(r.ok ? 'Added to Steam — restart Steam to see it' : r.error, !r.ok); };
 
 // a second press confirms, so these work from a controller
-function pressTwice(btn, fn) {
+function pressTwice(btn, fn, warning = 'Press again to confirm') {
   if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = btn.dataset.label; fn(); return; }
   btn.dataset.label = btn.textContent;
   btn.dataset.armed = '1';
-  btn.textContent = 'Press again to confirm';
+  btn.textContent = warning;
   setTimeout(() => { if (btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = btn.dataset.label; } }, 3000);
 }
 
 $('e-remove').onclick = () => pressTwice($('e-remove'), async () => {
-  await window.api.removeGame(editing.id);
+  const r = await window.api.removeGame(editing.id);
+  if (r && !r.ok) { toast(r.error, true); return; }
   dlg.close('cancel');
   refresh();
-});
+}, editing.source === 'community' ? 'Press again: deletes the game, its saves and mods' : undefined);
 
 dlg.addEventListener('close', async () => {
   if (dlg.returnValue !== 'save' || !editing) return;
@@ -94,6 +151,7 @@ dlg.addEventListener('close', async () => {
     title: $('e-title').value.trim() || editing.title,
     description: $('e-desc').value.trim(),
     tag: $('e-tag').value.trim(),
+    collections: [...new Set($('e-coll').value.split(',').map((x) => x.trim()).filter(Boolean))],
     args: $('e-args').value.trim(),
     cwd: $('e-cwd').value.trim(),
     env: $('e-env').value.trim(),

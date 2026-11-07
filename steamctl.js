@@ -144,4 +144,4 @@ function start(steamRoot) {
   spawn(path.join(steamRoot, 'steam.exe'), ['-silent', '-cef-enable-debugging'], { detached: true, stdio: 'ignore' }).unref();
 }
 
-module.exports = { root, libraries, freeSpace, manifestPath, roomiestLibrary, markForUpdate, pause, cancelUpdate, cancelInstall, removeLeftovers, writeInstallManifest, progress, gameRunning, shutdown, start, safeFolder };
+module.exports = { isRunning: steamRunning, root, libraries, freeSpace, manifestPath, roomiestLibrary, markForUpdate, pause, cancelUpdate, cancelInstall, removeLeftovers, writeInstallManifest, progress, gameRunning, shutdown, start, safeFolder };

@@ -77,6 +77,7 @@
     <label>Title <input id="e-title"></label>
     <label>Description <input id="e-desc" placeholder="short tagline shown on the card"></label>
     <label>Genre / tag <input id="e-tag" placeholder="e.g. Racing"></label>
+    <label>Collections <input id="e-coll" placeholder="separate with commas, e.g. Couch co-op, Racing"></label>
 
     <h3>Launch options</h3>
     <label>Display mode
@@ -123,6 +124,7 @@
       <button type="button" id="e-startmenu">Start Menu shortcut</button>
       <button type="button" id="e-steam">Add to Steam</button>
       <button type="button" id="e-folder">Open game folder</button>
+      <button type="button" id="e-mods" hidden>Mods</button>
     </div>
 
     <div class="row" style="margin-top:22px">
@@ -131,6 +133,16 @@
       <button value="cancel">Cancel</button>
       <button id="e-saveb" value="save" class="primary">Save</button>
     </div>
+  </form>
+</dialog>
+
+<!-- Mods -->
+<dialog id="mods">
+  <form method="dialog">
+    <h2 id="mods-title">Mods</h2>
+    <p class="hint-text">From Thunderstore. Turn mods on and off in the game's own mod menu. Mods can stop working after a game update.</p>
+    <div id="mods-list"></div>
+    <div class="row settings-actions"><span class="spacer"></span><button value="cancel">Close</button></div>
   </form>
 </dialog>
 
@@ -173,6 +185,8 @@
     <label class="check"><input type="checkbox" id="s-startup"> Start with Windows</label>
     <label class="check"><input type="checkbox" id="s-minimised"> Start minimised to the tray when launched by Windows</label>
     <label class="check"><input type="checkbox" id="s-tray"> Close button minimises to the tray</label>
+    <label class="check"><input type="checkbox" id="s-steamauto"> Start Steam in the background, so downloads are ready straight away</label>
+    <label class="check"><input type="checkbox" id="s-padwake"> Hold View + Menu on a controller to bring Kinetic to the front, even during a game</label>
 
     <h3>When a game starts</h3>
     <label>Launcher behaviour

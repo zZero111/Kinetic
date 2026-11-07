@@ -15,6 +15,8 @@ $('open-settings').onclick = async () => {
   $('s-sgdb').value = s.sgdbKey || '';
   $('s-discord').value = s.discordId || '';
   $('s-tray').checked = !!s.closeToTray;
+  $('s-padwake').checked = s.padWake !== false;
+  $('s-steamauto').checked = s.steamAuto !== false;
   $('s-fullscreen').checked = !!s.startFullscreen;
   $('s-startup').checked = !!s.launchAtStartup;
   $('s-minimised').checked = !!s.startMinimised;
@@ -38,6 +40,8 @@ settingsDlg.addEventListener('close', async () => {
     sgdbKey: $('s-sgdb').value.trim(),
     discordId: $('s-discord').value.trim(),
     closeToTray: $('s-tray').checked,
+    padWake: $('s-padwake').checked,
+    steamAuto: $('s-steamauto').checked,
     display: $('s-display').value,
     startFullscreen: $('s-fullscreen').checked,
     launchAtStartup: $('s-startup').checked,
