@@ -19,7 +19,7 @@ async function refreshCatalog(fetchFn) {
   try {
     const res = await fetchFn(CATALOG_URL);
     const list = res.ok ? await res.json() : null;
-    if (Array.isArray(list) && list.length && list.every((c) => Number.isInteger(c.id) && /^[\w.-]+\/[\w.-]+$/.test(c.repo) && c.title)) CATALOG = list;
+    if (Array.isArray(list) && list.length >= CATALOG.length && list.every((c) => Number.isInteger(c.id) && /^[\w.-]+\/[\w.-]+$/.test(c.repo) && c.title)) CATALOG = list;
   } catch {} // the built-in list carries on working
 }
 
@@ -39,7 +39,7 @@ function toGame(r) {
   const image = ''; // GitHub has no game art; the page draws a title card instead
   return {
     source: 'community', id: r.id, repo: r.full_name, name: known ? known.title : r.name, url: r.html_url,
-    logo: (known && known.logo) || `https://github.com/${r.owner.login}.png?size=256`, requires: known ? known.needs : '',
+    logo: (known && known.logo) || `https://github.com/${r.owner.login}.png?size=128`, requires: known ? known.needs : '', platform: known ? known.platform : '',
     image, capsule: image, wide: image, tall: image, final: 0, price: 'Free', rating: 0, discount: 0,
     released: r.pushed_at ? r.pushed_at.slice(0, 10) : '', currency: '', catalogued: !!known,
   };
@@ -48,20 +48,19 @@ function toGame(r) {
 const catalog = () => CATALOG.map(asRepo).map(toGame);
 
 async function home(_cc, fetchFn) {
-  await refreshCatalog(fetchFn);
-  const all = catalog();
-  return { spotlights: [], daily: [], specials: [], topSellers: all, newReleases: [] };
+  refreshCatalog(fetchFn); // in the background, so a slow connection can't hold the page up
+  return { spotlights: [], daily: [], specials: [], topSellers: catalog().slice(0, 12), newReleases: [] }; // the featured card only shows 12
 }
 
 async function browse(q, _cc, fetchFn) {
   const term = String(q.term || '').trim();
-  if (Number(q.start)) return { total: 0, items: [] };
+  const start = Number(q.start) || 0;
   // typing owner/name adds any project, not just the catalogue
-  if (/^[\w.-]+\/[\w.-]+$/.test(term)) return { total: 1, items: [toGame(await getJson(fetchFn, `${API}/repos/${term}`))] };
-  await refreshCatalog(fetchFn);
-  const all = catalog();
+  if (/^[\w.-]+\/[\w.-]+$/.test(term)) return { total: 1, items: start ? [] : [toGame(await getJson(fetchFn, `${API}/repos/${term}`))] };
+  refreshCatalog(fetchFn);
+  const all = catalog().filter((g) => !q.platform || g.platform === q.platform);
   const items = term ? all.filter((g) => `${g.name} ${g.repo}`.toLowerCase().includes(term.toLowerCase())) : all;
-  return { total: items.length, items };
+  return { total: items.length, items: items.slice(start, start + 50) };
 }
 
 // the Windows download from a release: a portable zip, preferring 64-bit
@@ -80,9 +79,10 @@ async function details(id, _cc, fetchFn) {
   const rel = await latest(r.full_name, fetchFn).catch((err) => { if (/limiting/.test(err.message)) throw err; return null; });
   const asset = rel && pickAsset(rel.assets);
   const known = entry(r);
-  const needs = !known ? 'Not in the Kinetic catalogue. Only install projects you trust.' : known.needs ? `You need your own copy of ${known.needs}.` : '';
+  const needs = [known?.needs ? `You need your own copy of ${known.needs}.` : known?.own ? 'You need your own copy of the original game.' : '',
+    !known || known.listed ? 'Community project, not checked by Kinetic. Only install projects you trust.' : ''].filter(Boolean).join(' ');
   return {
-    ...toGame(r), free: true, price: '', comingSoon: false, trailers: [], storage: asset ? asset.size : 0,
+    ...toGame(r), free: true, price: '', stars: known?.stars || r.stargazers_count || 0, comingSoon: false, trailers: [], storage: asset ? asset.size : 0,
     screenshots: ((known && known.shots) || []).map((u) => ({ thumb: u, full: u })),
     notes: rel && rel.body ? rel.body.replace(/\[!\w+\]/g, '').replace(/[#*`>_]|\[|\]\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().slice(0, 420) : '',
     description: `${r.description || ''} ${needs}`.trim(), genres: ['Community'], developers: [r.owner.login],

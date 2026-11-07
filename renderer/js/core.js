@@ -46,7 +46,7 @@ function fmtLast(iso) {
 
 // Images are decoded ahead of time, so a card never appears with its art missing or changing fit.
 const artOf = (g) => g.bgView || g.background || g.cover;
-const faceOf = (g) => g.cover || g.logo;
+const faceOf = (g) => g.coverView || g.cover || g.logo;
 const warmed = new Map(); // url -> { img, done }; holding the Image keeps it decoded
 const portrait = new Map(); // url -> true when the art fills the 3:4 frame
 const isPortrait = (img) => Math.abs(img.naturalWidth / img.naturalHeight - 0.75) < 0.12;

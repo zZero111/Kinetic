@@ -25,11 +25,11 @@ while ($true) {
     }
   }
   if ($down) {
-    $heldFor += 100
+    $heldFor += 150
     if ($heldFor -ge 700 -and -not $fired) { $fired = $true; [Console]::Out.WriteLine('combo') }
   } else { $heldFor = 0; $fired = $false }
   # checking for pads that aren't plugged in is slow, so an idle PC looks far less often
-  if ($connected) { Start-Sleep -Milliseconds 100 } else { Start-Sleep -Seconds 3 }
+  if ($connected) { Start-Sleep -Milliseconds 150 } else { Start-Sleep -Seconds 3 }
 }
 `;
 

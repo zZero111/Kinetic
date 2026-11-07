@@ -1,19 +1,23 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, net, screen, WebContentsView } = require('electron');
-const importers = require('./importers');
-const updater = require('./updater');
-const store = require('./store');
-const storeGog = require('./store_gog');
-const community = require('./community');
-const storeEpic = require('./store_epic');
+// these are only needed once the Store, a download or a mod is used, so they stay out of startup
+const lazy = (file) => { let m; return new Proxy({}, { get: (_t, k) => (m = m || require(file))[k] }); };
+const importers = lazy('./importers');
+const updater = lazy('./updater');
+const store = lazy('./store');
+const storeGog = lazy('./store_gog');
+const community = lazy('./community');
+const storeEpic = lazy('./store_epic');
 const padwatch = require('./padwatch');
-const mods = require('./mods');
-const steamctl = require('./steamctl');
-const steamlive = require('./steamlive');
+const mods = lazy('./mods');
+const steamctl = lazy('./steamctl');
+const steamlive = lazy('./steamlive');
 const { spawn, execFile } = require('child_process');
 const os = require('os');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+
+Menu.setApplicationMenu(null); // the default menu is never shown, but still takes time to build
 
 // a packaged exe would otherwise use a different folder name and lose the library
 if (app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'game-launcher'));
@@ -193,6 +197,9 @@ function createWindow() {
   });
   win.on('focus', () => { send('window:active', true); if (startupDone) { syncAzimuth(); refreshSteamState(); checkCommunityUpdates(); } });
   win.on('blur', () => send('window:active', false));
+  // out of sight, the page gives back its image memory, which matters most while a game is running
+  win.on('minimize', () => send('window:rest'));
+  win.on('hide', () => send('window:rest'));
   win.on('close', (e) => {
     if (app.isQuitting) return;
     const gameRunning = running.size > 0; // quitting now would lose the session's play time
@@ -269,14 +276,14 @@ const thumbQueue = new Map();
 const thumbFailed = new Set();
 let thumbTimer = null;
 
-async function artView(src) {
+async function artView(src, width = 1600) {
   if (!src) return '';
   try {
     const st = await fs.promises.stat(src);
-    const file = path.join(thumbDir(), crypto.createHash('sha1').update(`${src}|${st.mtimeMs}|${st.size}`).digest('hex') + '.jpg');
+    const file = path.join(thumbDir(), crypto.createHash('sha1').update(`${src}|${st.mtimeMs}|${st.size}|${width}`).digest('hex') + '.jpg');
     if (await pathExists(file)) return file;
     if (!thumbFailed.has(src)) {
-      thumbQueue.set(src, file);
+      thumbQueue.set(file, { src, width });
       if (!thumbTimer) thumbTimer = setTimeout(makeThumbs, 2500);
     }
   } catch {}
@@ -286,12 +293,12 @@ async function artView(src) {
 async function makeThumbs() {
   let made = 0;
   await fs.promises.mkdir(thumbDir(), { recursive: true });
-  for (const [src, file] of [...thumbQueue]) {
-    thumbQueue.delete(src);
+  for (const [file, { src, width }] of [...thumbQueue]) {
+    thumbQueue.delete(file);
     try {
       const img = nativeImage.createFromPath(src);
       if (img.isEmpty()) { thumbFailed.add(src); continue; } // a format Electron can't read here, e.g. webp
-      const small = img.getSize().width > 1600 ? img.resize({ width: 1600, quality: 'good' }) : img;
+      const small = img.getSize().width > width ? img.resize({ width, quality: 'good' }) : img;
       await fs.promises.writeFile(file, small.toJPEG(86));
       made++;
     } catch { thumbFailed.add(src); }
@@ -306,19 +313,19 @@ async function makeThumbs() {
 const inspected = new Map();
 function inspectGame(g) {
   let late = false;
-  const job = Promise.all([problemForAsync(g), artView(g.background)]).then(([problem, view]) => {
+  const job = Promise.all([problemForAsync(g), artView(g.background), artView(g.cover, 900)]).then(([problem, view, coverView]) => {
     const prev = inspected.get(g.id);
-    inspected.set(g.id, { problem, view });
+    inspected.set(g.id, { problem, view, coverView });
     if (late && (!prev || prev.problem !== problem || prev.view !== view)) send('library:changed');
-    return { problem, view };
+    return { problem, view, coverView };
   });
-  return Promise.race([job, sleep(300).then(() => { late = true; return inspected.get(g.id) || { problem: '', view: '' }; })]);
+  return Promise.race([job, sleep(300).then(() => { late = true; return inspected.get(g.id) || { problem: '', view: '', coverView: '' }; })]);
 }
 
 ipcMain.handle('library:get', async () => {
   const games = loadLibrary();
   const info = await Promise.all(games.map(inspectGame));
-  return games.map((g, i) => ({ ...newGame({}), ...g, running: running.has(g.id), problem: info[i].problem, bgView: info[i].view, updateNeeded: (g.source === 'steam' && steamGames.some((s) => s.update && s.id === String(g.sourceId))) || communityUpdates.has(g.id) }));
+  return games.map((g, i) => ({ ...newGame({}), ...g, running: running.has(g.id), problem: info[i].problem, bgView: info[i].view, coverView: info[i].coverView, updateNeeded: (g.source === 'steam' && steamGames.some((s) => s.update && s.id === String(g.sourceId))) || communityUpdates.has(g.id) }));
 });
 
 ipcMain.handle('library:add', async () => {
@@ -1095,15 +1102,38 @@ async function refreshSteamState() {
 }
 
 // real covers for community games when the user has added a SteamGridDB key, searched by the original game's name
-async function withCover(items) {
+// Each game costs four requests, so the page never waits for them: art already found is used at once and is kept on
+// disk, and the rest arrives a few at a time and is dropped into the tiles as it comes.
+const coverFile = () => path.join(userData(), 'recomp-art.json');
+let covers = null;
+const coverQueue = new Map();
+let coverWorkers = 0, coverSave = null;
+function applyCover(g, best) {
+  g.wide = best.background || g.wide;
+  g.capsule = g.image = best.background || best.cover || g.image;
+  g.tall = best.cover || g.tall;
+}
+async function coverWorker() {
+  for (const [repo, g] of coverQueue) {
+    coverQueue.delete(repo);
+    const best = await sgdbBest(g.requires || g.name).catch(() => undefined);
+    if (best === undefined) continue; // a failed request is tried again next time
+    covers[repo] = { at: Date.now(), best };
+    clearTimeout(coverSave);
+    coverSave = setTimeout(() => fs.promises.writeFile(coverFile(), JSON.stringify(covers)).catch(() => {}), 2000);
+    if (best) { applyCover(g, best); send('store:art', { id: g.id, wide: g.wide, capsule: g.capsule, image: g.image, tall: g.tall }); }
+  }
+  coverWorkers--;
+}
+function withCover(items) {
   if (!loadSettings().sgdbKey) return;
-  await Promise.all(items.map(async (g) => {
-    const best = await cached(`art${g.repo}`, 86400000, () => sgdbBest(g.requires || g.name)).catch(() => null);
-    if (!best) return;
-    g.wide = best.background || g.wide;
-    g.capsule = g.image = best.background || best.cover || g.image;
-    g.tall = best.cover || g.tall;
-  }));
+  if (!covers) { try { covers = JSON.parse(fs.readFileSync(coverFile(), 'utf8')); } catch { covers = {}; } }
+  for (const g of items) {
+    const known = covers[g.repo];
+    if (known?.best) applyCover(g, known.best);
+    if (!known || Date.now() - known.at > 7 * 86400000) coverQueue.set(g.repo, g);
+  }
+  while (coverWorkers < 3 && coverWorkers < coverQueue.size) { coverWorkers++; coverWorker(); }
 }
 
 // add Epic or Xbox here once they have a module with the same shape as store.js
@@ -1125,7 +1155,7 @@ function cached(key, ms, make) {
 ipcMain.handle('store:home', (_e, source) => storeCall(async () => {
   await refreshSteamState();
   const home = await cached(`h${source}`, 600000, () => provider(source).home(region(), storeFetch));
-  if (source === 'community') await withCover(home.topSellers);
+  if (source === 'community') withCover(home.topSellers);
   return { ...home, updates: steamGames.filter((g) => g.update), installed: steamGames.filter((g) => !g.unfinished).map((g) => g.id) };
 }));
 ipcMain.handle('store:search', (_e, term) => storeCall(() => store.search(String(term), region(), storeFetch)));
@@ -1393,7 +1423,7 @@ async function adoptUnfinishedInstalls() {
 ipcMain.handle('steam:control', (_e, action, id) => (['pause', 'resume', 'cancel'].includes(action) ? controlSteamJob(action, id) : { ok: false, error: 'Unknown action' }));
 ipcMain.handle('store:browse', (_e, q) => storeCall(async () => {
   const r = await cached(`b${JSON.stringify(q)}`, 300000, () => provider(q && q.source).browse(q || {}, region(), storeFetch));
-  if (q && q.source === 'community') await withCover(r.items);
+  if (q && q.source === 'community') withCover(r.items);
   return r;
 }));
 ipcMain.handle('store:tags', (_e, source) => storeCall(() => provider(source).tags(storeFetch)));

@@ -222,7 +222,19 @@ function readPad(p) {
 
 // while a game or anything else has focus, the launcher must not react to the controller
 let windowActive = true;
-window.api.onWindowActive((on) => { windowActive = on; });
+window.api.onWindowActive((on) => {
+  windowActive = on;
+  if (padTimer) { clearInterval(padTimer); padTimer = setInterval(pollPad, on ? 16 : 500); } // barely runs during a game
+  if (!on) document.querySelectorAll('.si-stage video').forEach((v) => v.pause());
+});
+
+window.api.onRest(() => {
+  stopTrailer();
+  warmed.clear();
+  portrait.clear();
+  if (tab !== 'store' && browseGrid) { browseGrid = null; storeEl.replaceChildren(); } // rebuilt when next opened
+  window.api.clearImageCache();
+});
 
 function pollPad() {
   if (!windowActive) return;

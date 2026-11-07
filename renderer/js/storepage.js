@@ -44,7 +44,7 @@ const STORE_LANGS = [['', 'Any language'], ['english', 'English'], ['french', 'F
 const STORE_PRICES = [['', 'Any price'], ['free', 'Free'], ['5', 'Under 5'], ['10', 'Under 10'], ['20', 'Under 20'], ['40', 'Under 40']];
 const STORE_SORTS = [['', 'Popular'], ['Reviews_DESC', 'Top rated'], ['Released_DESC', 'Newest'], ['Price_ASC', 'Lowest price'], ['Price_DESC', 'Highest price'], ['Name_ASC', 'Name']];
 
-const emptyFilters = () => ({ sort: '', maxprice: '', type: '998', lang: '', tags: [], features: [], os: [], specials: false, hideF2p: false });
+const emptyFilters = () => ({ platform: '', sort: '', maxprice: '', type: '998', lang: '', tags: [], features: [], os: [], specials: false, hideF2p: false });
 const browseQ = emptyFilters();
 let storeTab = 'all', tagOptions = [], heroList = [], heroIndex = 0, heroBox = null, offersBox = null, clearBtn = null, drawer = null;
 let browseStart = 0, browseTotal = 0, browseLoading = false, browseGrid = null, browseHead = null, browseSub = null, browseCount = 0;
@@ -52,7 +52,7 @@ const saved = (k) => { try { return JSON.parse(localStorage.getItem(k)) || []; }
 let wishlist = saved('wishlist'), cart = saved('cart');
 const keep = () => { localStorage.setItem('wishlist', JSON.stringify(wishlist)); localStorage.setItem('cart', JSON.stringify(cart)); };
 
-const filterCount = () => browseQ.tags.length + browseQ.features.length + browseQ.os.length + [browseQ.lang, browseQ.hideF2p, browseQ.type !== '998'].filter(Boolean).length + (storeTab === 'all' ? [browseQ.maxprice, browseQ.specials].filter(Boolean).length : 0);
+const filterCount = () => (browseQ.platform ? 1 : 0) + browseQ.tags.length + browseQ.features.length + browseQ.os.length + [browseQ.lang, browseQ.hideF2p, browseQ.type !== '998'].filter(Boolean).length + (storeTab === 'all' ? [browseQ.maxprice, browseQ.specials].filter(Boolean).length : 0);
 const filtering = () => !!($('search').value.trim() || storeTab !== 'all' || browseQ.sort || filterCount());
 const shownPrice = (x) => x.price || priceText(x);
 const wasPrice = (x) => x.was || (x.discount && x.original ? priceText({ ...x, final: x.original }) : '');
@@ -66,6 +66,8 @@ function artImg(x, prefer) {
       const logo = el('img', 'art-logo');
       logo.src = x.logo;
       logo.alt = '';
+      logo.loading = 'lazy';
+      logo.decoding = 'async';
       logo.onerror = () => logo.remove();
       card.append(logo);
     }
@@ -172,8 +174,19 @@ function gameCard(x, n) {
   foot.append(line, el('span', 'tile-rate', x.rating ? x.rating + '%' : ''));
   b.append(face, el('div', 'tile-name', plainText(x.name)), foot);
   b.onclick = () => openStoreItem(x.id);
+  b.game = x;
   return b;
 }
+
+// Recomp art turns up after the tiles are drawn
+window.api.onStoreArt((art) => {
+  if (!browseGrid) return;
+  for (const b of browseGrid.querySelectorAll('.tile')) {
+    if (b.game?.id !== art.id) continue;
+    Object.assign(b.game, art);
+    b.querySelector('.tile-art').replaceChildren(artImg(b.game, 'capsule'));
+  }
+});
 
 function setHeroInfo(row, label, value) { row.replaceChildren(el('label', '', label), el('span', '', value)); }
 
@@ -331,7 +344,7 @@ async function loadMore(run) {
   if (!r.ok) { browseSub.textContent = ''; browseGrid.replaceChildren(el('p', 'store-msg', r.error)); return; }
   browseTotal = r.data.total;
   browseStart += 50;
-  browseSub.textContent = isEpic() ? "Epic's free games. Its full catalogue can only be browsed on Epic's site." : isCommunity() ? 'Type owner/name in search to add any GitHub project' : `${browseTotal.toLocaleString()} games`;
+  browseSub.textContent = isEpic() ? "Epic's free games. Its full catalogue can only be browsed on Epic's site." : isCommunity() ? `${browseTotal} projects. Type owner/name in search to add any other GitHub project.` : `${browseTotal.toLocaleString()} games`;
   browseGrid.append(...r.data.items.map((x) => gameCard(x, ++browseCount)));
   // the first rows are on screen straight away, so they skip the lazy-loading wait
   if (browseCount <= 50) [...browseGrid.querySelectorAll('img')].slice(0, 21).forEach((i) => { i.loading = 'eager'; i.fetchPriority = 'high'; });
@@ -529,6 +542,7 @@ async function showStore() {
   cartBtn.hidden = isCommunity() || isEpic();
   sort.hidden = isCommunity() || isEpic();
   bar.append(source, cartBtn, pager);
+  if (isCommunity()) bar.append(storeSelect('platform', [['', 'All platforms'], ...['N64', 'SNES', 'GameCube', 'Wii', 'Wii U', 'Switch', 'GBA', 'DS', 'PS1', 'PS2', 'PS3', 'PS4', 'PSP', 'Xbox', 'Xbox 360', 'Arcade', 'Other'].map((n) => [n, n])], 'Platform'));
   if (isSteam() && r.data.updates.length) {
     const up = el('button', 'store-btn hot', `Update ${r.data.updates.length} ${r.data.updates.length === 1 ? 'game' : 'games'}`);
     up.type = 'button';
@@ -627,7 +641,7 @@ async function openStoreItem(id) {
   meta.append(el('span', 'tag', installedIds.has(String(id)) ? 'Installed' : price));
   if (d.discount) meta.append(el('span', 'tag warn', `-${d.discount}%`));
   const facts = el('div', 'si-facts');
-  for (const [k, v] of [['Requires', d.requires], ['Rating', d.rating ? d.rating + '%' : ''], ['Released', d.released], ['Developer', d.developers.join(', ')], ['Genres', d.genres.slice(0, 3).join(', ')]]) {
+  for (const [k, v] of [['Platform', d.platform], ['GitHub stars', d.stars ? d.stars.toLocaleString() : ''], ['Requires', d.requires], ['Rating', d.rating ? d.rating + '%' : ''], ['Released', d.released], ['Developer', d.developers.join(', ')], ['Genres', d.genres.slice(0, 3).join(', ')]]) {
     if (v) { const r2 = el('div'); r2.append(el('label', '', k), el('span', '', v)); facts.append(r2); }
   }
   const media = el('div', 'si-media');

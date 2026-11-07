@@ -106,3 +106,18 @@ test('versions compare as numbers', () => {
   assert.equal(compareVersions('v0.1.2', '0.1.2'), 0);
   assert.equal(compareVersions('0.1.1', '0.1.2'), -1);
 });
+
+test('the Recomps store pages through the whole catalogue', async () => {
+  const community = require('../community');
+  const noNet = async () => ({ ok: false });
+  const seen = [];
+  let r;
+  for (let start = 0; ; start += 50) {
+    r = await community.browse({ start }, 'GB', noNet);
+    assert.ok(r.total > 100);
+    if (!r.items.length) break;
+    seen.push(...r.items.map((g) => g.id));
+  }
+  assert.equal(seen.length, r.total);
+  assert.equal(new Set(seen).size, r.total);
+});

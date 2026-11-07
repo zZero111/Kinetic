@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 const inv = (ch) => (...a) => ipcRenderer.invoke(ch, ...a);
 
@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('api', {
   storeDetails: inv('store:details'),
   steamAction: inv('store:steam'),
   steamJob: inv('steam:job'),
+  clearImageCache: () => webFrame.clearCache(),
+  onRest: (cb) => ipcRenderer.on('window:rest', () => cb()),
   drives: inv('system:drives'),
   modsList: inv('mods:list'),
   onModProgress: (cb) => ipcRenderer.on('mods:progress', (_e, id, label, pct) => cb(id, label, pct)),
@@ -57,6 +59,7 @@ contextBridge.exposeInMainWorld('api', {
   steamControl: inv('steam:control'),
   storeBrowse: inv('store:browse'),
   storeTags: inv('store:tags'),
+  onStoreArt: (cb) => ipcRenderer.on('store:art', (_e, art) => cb(art)),
   onSteamJobs: (cb) => ipcRenderer.on('steam:jobs', (_e, list) => cb(list)),
   onSteamFinished: (cb) => ipcRenderer.on('steam:finished', (_e, ok, msg) => cb(ok, msg)),
   scanImport: inv('import:scan'),
